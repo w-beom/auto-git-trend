@@ -2,6 +2,7 @@ import type {
   RepositoryMetadata,
   TrendingRepositorySeed,
 } from "@/lib/snapshots/types";
+import { extractReadmeText } from "@/lib/github/extract-readme-text";
 
 const README_EXCERPT_LIMIT = 3000;
 
@@ -54,7 +55,7 @@ export function serializeRepositoryForUpsert(
 }
 
 export function serializeReadmeExcerpt(readme: string | null): string | null {
-  const normalized = normalizeNullableText(readme);
+  const normalized = normalizeNullableText(extractReadmeText(readme));
   if (!normalized) {
     return null;
   }

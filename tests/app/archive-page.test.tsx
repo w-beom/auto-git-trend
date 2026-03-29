@@ -76,12 +76,18 @@ describe("ArchivePage", () => {
     expect(screen.getByText("Captured Mar 28, 2026, 9:20 AM KST")).toBeInTheDocument();
     expect(screen.getAllByText("gamma/comet")).toHaveLength(2);
     expect(screen.getByText("1위")).toBeInTheDocument();
-    expect(screen.getAllByText("Go")).toHaveLength(2);
+    expect(screen.queryByText("Go")).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: "gamma/comet GitHub에서 보기" })).toHaveAttribute(
       "href",
       "https://github.com/gamma/comet",
     );
     expect(screen.getByText("총 1개 저장소")).toBeInTheDocument();
+    expect(
+      screen.queryByText("릴리스 체크리스트와 배포 로그를 한 흐름으로 묶습니다."),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("Static deploy automation."),
+    ).not.toBeInTheDocument();
   });
 
   it("uses notFound when the snapshot date does not exist", async () => {
