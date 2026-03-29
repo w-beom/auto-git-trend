@@ -376,7 +376,57 @@ describe("createSupabaseSnapshotStore", () => {
     });
     expect(events).toEqual([
       'select:trending_snapshots:[["snapshot_date","2026-03-29"]]',
+      'delete:trending_snapshot_items:[["snapshot_id","snapshot-failed"]]',
       'update:trending_snapshots:{"status":"running","item_count":0,"captured_at":"2026-03-29T00:00:00.000Z"}:[["id","snapshot-failed"],["status","failed"]]',
+    ]);
+  });
+
+  it("leaves a failed snapshot failed when cleanup errors during retry preparation", async () => {
+    const events: string[] = [];
+    const store = createSupabaseSnapshotStore(
+      createSupabaseClientDouble({
+        selectMaybeSingle: async ({ table, filters }) => {
+          events.push(`select:${table}:${JSON.stringify(filters)}`);
+
+          return {
+            data: {
+              id: "snapshot-failed",
+              status: "failed",
+            },
+            error: null,
+          };
+        },
+        deleteEq: async ({ table, filters }) => {
+          events.push(`delete:${table}:${JSON.stringify(filters)}`);
+
+          return {
+            error: {
+              message: "delete failed",
+            },
+          };
+        },
+        updateMaybeSingle: async ({ table, payload, filters }) => {
+          events.push(`update:${table}:${JSON.stringify(payload)}:${JSON.stringify(filters)}`);
+
+          return {
+            data: {
+              id: "snapshot-failed",
+            },
+            error: null,
+          };
+        },
+      }),
+    );
+
+    await expect(
+      store.prepareSnapshotRun({
+        snapshotDate: "2026-03-29",
+        capturedAt: new Date("2026-03-29T00:00:00.000Z"),
+      }),
+    ).rejects.toThrow("Failed to clear snapshot items for snapshot-failed: delete failed");
+
+    expect(events).toEqual([
+      'select:trending_snapshots:[["snapshot_date","2026-03-29"]]',
       'delete:trending_snapshot_items:[["snapshot_id","snapshot-failed"]]',
     ]);
   });
