@@ -41,5 +41,5 @@ Invoke-WebRequest -Headers @{ Authorization = "Bearer <CRON_SECRET>" } http://lo
 
 ## Deployment Notes
 
-- `vercel.json`에 cron 스케줄 `0 0 * * *`가 설정되어 있어 09:00 KST에 수집이 실행됩니다.
+- `vercel.json`의 cron 스케줄 `0 0 * * *`는 `00:00 UTC` 기준이며 한국 시간으로는 대략 `09:00 KST`입니다. Vercel Hobby에서는 일일 cron 작업이 그 시간대 안에서 실행될 수 있습니다.
 - 공개 페이지는 클라이언트 fetch 없이 서버에서 스냅샷 데이터를 읽습니다.
