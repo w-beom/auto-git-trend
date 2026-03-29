@@ -1,16 +1,20 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-
-function SmokeFixture() {
-  return <h1>Vitest and RTL smoke works</h1>;
-}
+import HomePage from "@/app/page";
 
 describe("HomePage smoke test", () => {
-  it("renders the bootstrap placeholder through RTL", () => {
-    render(<SmokeFixture />);
+  it("renders the real placeholder heading and body copy", () => {
+    render(<HomePage />);
 
     expect(
-      screen.getByRole("heading", { name: "Vitest and RTL smoke works" }),
+      screen.getByRole("heading", {
+        name: "Trending snapshots will render here later.",
+      }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "The base app is ready for the daily GitHub Trending pipeline and future archive views.",
+      ),
     ).toBeInTheDocument();
   });
 });
