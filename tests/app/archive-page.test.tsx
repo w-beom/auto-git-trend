@@ -66,7 +66,11 @@ describe("ArchivePage", () => {
     );
 
     expect(getSnapshotPageDataByDate).toHaveBeenCalledWith("2026-03-28");
-    expect(screen.getByText("2026-03-28")).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", {
+        name: "Trending snapshot for 2026-03-28",
+      }),
+    ).toBeInTheDocument();
     expect(screen.getByText("gamma/comet")).toBeInTheDocument();
     expect(screen.getByText("1 repositories captured")).toBeInTheDocument();
   });

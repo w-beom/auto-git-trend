@@ -1,4 +1,4 @@
-import { act, cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const { getLatestSnapshotPageData } = vi.hoisted(() => ({
@@ -74,32 +74,38 @@ describe("HomePage", () => {
   it("renders the latest snapshot summary data", async () => {
     getLatestSnapshotPageData.mockResolvedValue(buildSnapshot());
 
-    await act(async () => {
-      render(<HomePage />);
-    });
+    render(await HomePage());
 
     expect(getLatestSnapshotPageData).toHaveBeenCalled();
-    expect(await screen.findByText("2026-03-29")).toBeInTheDocument();
     expect(
-      await screen.findByText("Captured Mar 29, 2026, 12:15 AM UTC"),
+      screen.getByRole("heading", {
+        name: "Trending snapshot for 2026-03-29",
+      }),
     ).toBeInTheDocument();
-    expect(await screen.findByText("2 repositories captured")).toBeInTheDocument();
-    expect(await screen.findByText("acme/rocket")).toBeInTheDocument();
-    expect(await screen.findByText("beta/orbit")).toBeInTheDocument();
     expect(
-      await screen.findByText("빠르게 배포할 수 있는 로켓 플랫폼입니다."),
+      screen.getByText("Captured Mar 29, 2026, 12:15 AM UTC"),
     ).toBeInTheDocument();
+    expect(screen.getByText("2 repositories captured")).toBeInTheDocument();
+    expect(screen.getByText("acme/rocket")).toBeInTheDocument();
+    expect(screen.getByText("beta/orbit")).toBeInTheDocument();
+    expect(
+      screen.getByText("빠르게 배포할 수 있는 로켓 플랫폼입니다."),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText("Trending snapshots will render here later."),
+    ).not.toBeInTheDocument();
   });
 
   it("renders a safe empty state when no latest snapshot exists", async () => {
     getLatestSnapshotPageData.mockResolvedValue(null);
 
-    await act(async () => {
-      render(<HomePage />);
-    });
+    render(await HomePage());
 
     expect(
-      await screen.findByText("The latest GitHub Trending snapshot is not available yet."),
+      screen.getByText("The latest GitHub Trending snapshot is not available yet."),
     ).toBeInTheDocument();
+    expect(
+      screen.queryByText("Trending snapshots will render here later."),
+    ).not.toBeInTheDocument();
   });
 });
