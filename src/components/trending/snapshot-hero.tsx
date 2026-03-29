@@ -20,12 +20,12 @@ export function SnapshotHero({
         <h1 id="snapshot-heading" className="hero-panel__title">
           {isArchive
             ? `${snapshot.snapshotDate} 아카이브 호`
-            : "오늘의 GitHub 트렌드 스냅샷"}
+            : "가장 최근 GitHub 트렌드 스냅샷"}
         </h1>
         <p className="hero-panel__lede">
           {isArchive
             ? "지난 트렌드를 다시 읽는 하루치 오픈소스 다이제스트"
-            : "오늘 뜨는 프로젝트를 한글 큐레이션으로 빠르게 훑어보는 데일리 보드"}
+            : "가장 최근에 저장된 트렌드 보드를 한국어 큐레이션으로 다시 읽어보세요"}
         </p>
       </div>
 

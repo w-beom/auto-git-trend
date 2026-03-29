@@ -96,7 +96,7 @@ describe("HomePage", () => {
     expect(getLatestSnapshotPageData).toHaveBeenCalled();
     expect(
       screen.getByRole("heading", {
-        name: "오늘의 GitHub 트렌드 스냅샷",
+        name: "가장 최근 GitHub 트렌드 스냅샷",
       }),
     ).toBeInTheDocument();
     expect(
@@ -131,6 +131,73 @@ describe("HomePage", () => {
     ).toHaveAttribute("href", "https://github.com/acme/rocket");
     expect(
       screen.queryByText("Trending snapshots will render here later."),
+    ).not.toBeInTheDocument();
+  });
+
+  it("describes the hero accurately when the latest snapshot is not from today", async () => {
+    getLatestSnapshotPageData.mockResolvedValue({
+      ...buildSnapshot(),
+      snapshotDate: "2026-03-27",
+      capturedAtIso: "2026-03-27T00:15:00.000Z",
+      capturedAtLabel: "Captured Mar 27, 2026, 9:15 AM KST",
+    });
+
+    render(await HomePage());
+
+    expect(
+      screen.getByRole("heading", {
+        name: "가장 최근 GitHub 트렌드 스냅샷",
+      }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("2026-03-27 발행")).toBeInTheDocument();
+    expect(
+      screen.getByText("가장 최근에 저장된 트렌드 보드를 한국어 큐레이션으로 다시 읽어보세요"),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", {
+        name: "오늘의 GitHub 트렌드 스냅샷",
+      }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("uses topThree ordering and selection for the highlighted section", async () => {
+    getLatestSnapshotPageData.mockResolvedValue({
+      ...buildSnapshot(),
+      topThree: [
+        {
+          rank: 3,
+          fullName: "charlie/pulse",
+          summaryKo: "팀별 릴리스 흐름을 하루 단위로 추적하는 대시보드입니다.",
+        },
+        {
+          rank: 1,
+          fullName: "acme/rocket",
+          summaryKo: "빠르게 배포할 수 있는 로켓 플랫폼입니다.",
+        },
+      ],
+    });
+
+    render(await HomePage());
+
+    const featureLinks = screen
+      .getAllByRole("link")
+      .filter((link) =>
+        String(link.getAttribute("aria-label")).includes("하이라이트 GitHub에서 보기"),
+      );
+
+    expect(featureLinks).toHaveLength(2);
+    expect(featureLinks[0]).toHaveAttribute(
+      "aria-label",
+      "charlie/pulse 하이라이트 GitHub에서 보기",
+    );
+    expect(featureLinks[1]).toHaveAttribute(
+      "aria-label",
+      "acme/rocket 하이라이트 GitHub에서 보기",
+    );
+    expect(
+      screen.queryByRole("link", {
+        name: "beta/orbit 하이라이트 GitHub에서 보기",
+      }),
     ).not.toBeInTheDocument();
   });
 

@@ -17,7 +17,7 @@ export function SiteShell({
     <main className="site-shell">
       <div className="poster-grid">
         <SnapshotHero snapshot={snapshot} mode={mode} />
-        <TopThreeGrid items={snapshot.items} />
+        <TopThreeGrid highlights={snapshot.topThree} items={snapshot.items} />
         <RepositoryList items={snapshot.items} />
       </div>
     </main>

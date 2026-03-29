@@ -1,13 +1,21 @@
-import type { SnapshotPageItem } from "@/lib/snapshots/queries";
+import type { SnapshotHighlight, SnapshotPageItem } from "@/lib/snapshots/queries";
 
 import { RepositoryCard } from "@/components/trending/repository-card";
 
 interface TopThreeGridProps {
+  highlights: SnapshotHighlight[];
   items: SnapshotPageItem[];
 }
 
-export function TopThreeGrid({ items }: TopThreeGridProps) {
-  const topItems = items.slice(0, 3);
+export function TopThreeGrid({
+  highlights,
+  items,
+}: TopThreeGridProps) {
+  const topItems = highlights
+    .map((highlight) =>
+      items.find((item) => item.fullName === highlight.fullName),
+    )
+    .filter((item): item is SnapshotPageItem => item !== undefined);
 
   if (topItems.length === 0) {
     return null;
