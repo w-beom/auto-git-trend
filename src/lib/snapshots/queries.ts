@@ -1,4 +1,5 @@
-import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import { createClient } from "@supabase/supabase-js";
+import { z } from "zod";
 
 interface SnapshotItemQueryRow {
   rank: number;
@@ -83,20 +84,48 @@ const SNAPSHOT_SELECT = `
   )
 `;
 
-function createSnapshotQueryClient() {
-  try {
-    return createSupabaseAdminClient();
-  } catch (error) {
-    // Page routes should fall back safely when build/test environments omit runtime secrets.
-    if (
-      error instanceof Error &&
-      error.message.startsWith("Invalid server environment:")
-    ) {
-      return null;
-    }
+const snapshotQueryEnvSchema = z.object({
+  SUPABASE_URL: z.string().url(),
+  SUPABASE_SERVICE_ROLE_KEY: z.string().min(1),
+});
 
-    throw error;
+function formatEnvIssues(issues: z.ZodIssue[]): string {
+  return issues
+    .map((issue) => {
+      const key = issue.path.join(".") || "<root>";
+      return `${key}: ${issue.message}`;
+    })
+    .join("; ");
+}
+
+function createSnapshotQueryClient() {
+  const queryEnv = {
+    SUPABASE_URL: process.env.SUPABASE_URL,
+    SUPABASE_SERVICE_ROLE_KEY: process.env.SUPABASE_SERVICE_ROLE_KEY,
+  };
+
+  if (!queryEnv.SUPABASE_URL && !queryEnv.SUPABASE_SERVICE_ROLE_KEY) {
+    return null;
   }
+
+  const parsed = snapshotQueryEnvSchema.safeParse(queryEnv);
+
+  if (!parsed.success) {
+    throw new Error(
+      `Invalid snapshot query environment: ${formatEnvIssues(parsed.error.issues)}`,
+    );
+  }
+
+  return createClient(
+    parsed.data.SUPABASE_URL,
+    parsed.data.SUPABASE_SERVICE_ROLE_KEY,
+    {
+      auth: {
+        autoRefreshToken: false,
+        persistSession: false,
+      },
+    },
+  );
 }
 
 function formatCapturedAtLabel(capturedAtIso: string): string {
@@ -109,10 +138,10 @@ function formatCapturedAtLabel(capturedAtIso: string): string {
   const formatted = new Intl.DateTimeFormat("en-US", {
     dateStyle: "medium",
     timeStyle: "short",
-    timeZone: "UTC",
+    timeZone: "Asia/Seoul",
   }).format(capturedAt);
 
-  return `Captured ${formatted} UTC`;
+  return `Captured ${formatted} KST`;
 }
 
 function mapSnapshotRow(row: SnapshotQueryRow | null): SnapshotPageData | null {

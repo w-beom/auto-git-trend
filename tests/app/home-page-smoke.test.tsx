@@ -1,11 +1,23 @@
 import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+const { getLatestSnapshotPageData } = vi.hoisted(() => ({
+  getLatestSnapshotPageData: vi.fn(),
+}));
+
 import HomePage from "@/app/page";
+
+vi.mock("@/lib/snapshots/queries", () => ({
+  getLatestSnapshotPageData,
+}));
 
 describe("HomePage smoke test", () => {
   it("renders only the homepage safe empty state when no latest snapshot is available", async () => {
+    getLatestSnapshotPageData.mockResolvedValue(null);
+
     render(await HomePage());
 
+    expect(getLatestSnapshotPageData).toHaveBeenCalled();
     expect(
       screen.getByText("The latest GitHub Trending snapshot is not available yet."),
     ).toBeInTheDocument();

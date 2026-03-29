@@ -15,7 +15,7 @@ function buildSnapshot() {
   return {
     snapshotDate: "2026-03-29",
     capturedAtIso: "2026-03-29T00:15:00.000Z",
-    capturedAtLabel: "Captured Mar 29, 2026, 12:15 AM UTC",
+    capturedAtLabel: "Captured Mar 29, 2026, 9:15 AM KST",
     totalCount: 2,
     topThree: [
       {
@@ -83,7 +83,7 @@ describe("HomePage", () => {
       }),
     ).toBeInTheDocument();
     expect(
-      screen.getByText("Captured Mar 29, 2026, 12:15 AM UTC"),
+      screen.getByText("Captured Mar 29, 2026, 9:15 AM KST"),
     ).toBeInTheDocument();
     expect(screen.getByText("2 repositories captured")).toBeInTheDocument();
     expect(screen.getByText("acme/rocket")).toBeInTheDocument();

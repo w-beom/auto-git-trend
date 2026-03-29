@@ -22,7 +22,7 @@ function buildSnapshot() {
   return {
     snapshotDate: "2026-03-28",
     capturedAtIso: "2026-03-28T00:20:00.000Z",
-    capturedAtLabel: "Captured Mar 28, 2026, 12:20 AM UTC",
+    capturedAtLabel: "Captured Mar 28, 2026, 9:20 AM KST",
     totalCount: 1,
     topThree: [
       {
@@ -71,6 +71,7 @@ describe("ArchivePage", () => {
         name: "Trending snapshot for 2026-03-28",
       }),
     ).toBeInTheDocument();
+    expect(screen.getByText("Captured Mar 28, 2026, 9:20 AM KST")).toBeInTheDocument();
     expect(screen.getByText("gamma/comet")).toBeInTheDocument();
     expect(screen.getByText("1 repositories captured")).toBeInTheDocument();
   });
