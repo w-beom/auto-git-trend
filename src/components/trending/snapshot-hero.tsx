@@ -17,7 +17,10 @@ export function SnapshotHero({
         <p className="section-kicker">
           {isArchive ? "ARCHIVE ISSUE" : "KOREAN OPEN SOURCE DIGEST"}
         </p>
-        <h1 id="snapshot-heading" className="hero-panel__title">
+        <h1
+          id="snapshot-heading"
+          className={`hero-panel__title${isArchive ? "" : " hero-panel__title--latest"}`}
+        >
           {isArchive
             ? `${snapshot.snapshotDate} 아카이브 호`
             : "가장 최근 GitHub 트렌드 스냅샷"}

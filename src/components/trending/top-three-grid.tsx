@@ -1,6 +1,6 @@
 import type { SnapshotHighlight, SnapshotPageItem } from "@/lib/snapshots/queries";
 
-import { RepositoryCard } from "@/components/trending/repository-card";
+import { TopThreeCard } from "@/components/trending/top-three-card";
 
 interface TopThreeGridProps {
   highlights: SnapshotHighlight[];
@@ -29,11 +29,7 @@ export function TopThreeGrid({
       </div>
       <div className="top-three-grid">
         {topItems.map((item) => (
-          <RepositoryCard
-            key={`top-${item.fullName}`}
-            item={item}
-            variant="feature"
-          />
+          <TopThreeCard key={`top-${item.fullName}`} item={item} />
         ))}
       </div>
     </section>

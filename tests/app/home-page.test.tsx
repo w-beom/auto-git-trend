@@ -118,12 +118,15 @@ describe("HomePage", () => {
       screen.getAllByText("빠르게 배포할 수 있는 로켓 플랫폼입니다."),
     ).toHaveLength(2);
     expect(
-      screen.getAllByText("CLI와 워크플로 템플릿으로 배포 단계를 줄여 줍니다."),
-    ).toHaveLength(2);
-    expect(screen.getAllByText("TypeScript")).toHaveLength(2);
-    expect(screen.getAllByText("+120 today")).toHaveLength(2);
+      screen.queryByText("CLI와 워크플로 템플릿으로 배포 단계를 줄여 줍니다."),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("Release heartbeat dashboard."),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText("TypeScript")).not.toBeInTheDocument();
+    expect(screen.queryByText("+120 today")).not.toBeInTheDocument();
     expect(screen.getAllByText("4,200 stars")).toHaveLength(2);
-    expect(screen.getAllByText("210 forks")).toHaveLength(2);
+    expect(screen.getByText("210 forks")).toBeInTheDocument();
     expect(
       screen.getByRole("link", {
         name: "acme/rocket GitHub에서 보기",

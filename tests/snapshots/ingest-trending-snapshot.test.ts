@@ -284,7 +284,7 @@ describe("ingestTrendingSnapshot", () => {
         rank: 1,
         starsToday: 120,
         repoDescriptionSnapshot: "A fast launch platform.",
-        readmeExcerpt: "# Rocket\nLaunch docs",
+        readmeExcerpt: "Rocket\nLaunch docs",
         summaryKo: "요약:acme/rocket:A fast launch platform.:# Rocket\nLaunch docs",
       },
       "lease-2",
