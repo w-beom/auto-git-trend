@@ -3,14 +3,14 @@ create extension if not exists pgcrypto;
 create table if not exists repositories (
   id uuid primary key default gen_random_uuid(),
   github_repo_id bigint not null unique,
-  owner_login text not null,
+  owner text not null,
   name text not null,
   full_name text not null unique,
   github_url text not null,
   description text,
   primary_language text,
-  stars_total integer not null default 0,
-  forks_total integer not null default 0,
+  stars_total integer,
+  forks_total integer,
   default_branch text,
   avatar_url text,
   created_at timestamptz not null default now(),
@@ -20,9 +20,10 @@ create table if not exists repositories (
 create table if not exists trending_snapshots (
   id uuid primary key default gen_random_uuid(),
   snapshot_date date not null unique,
+  captured_at timestamptz not null,
   status text not null check (status in ('running', 'success', 'failed')),
   item_count integer not null default 0,
-  source text not null,
+  source text not null default 'github-trending',
   created_at timestamptz not null default now()
 );
 
