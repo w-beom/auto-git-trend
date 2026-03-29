@@ -3,10 +3,15 @@ import { fetchReadme } from '@/lib/github/fetch-readme';
 
 describe('fetchReadme', () => {
   it('decodes a base64 GitHub README response', async () => {
+    const wrappedBase64 = Buffer.from('# Hello\n\nWorld')
+      .toString('base64')
+      .replace(/(.{8})/g, '$1\n')
+      .trim();
+
     const fetchImpl = async () =>
       new Response(
         JSON.stringify({
-          content: Buffer.from('# Hello\n\nWorld').toString('base64'),
+          content: wrappedBase64,
           encoding: 'base64',
         }),
         {

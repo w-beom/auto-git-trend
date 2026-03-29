@@ -22,15 +22,15 @@ export function parseTrendingRepositories(html: string): TrendingRepositorySeed[
       return;
     }
 
-    const repositoryPath = href.replace(/^\/+/, '').replace(/\/+$/, '');
-    const pathParts = repositoryPath.split('/');
+    const repositoryPath = href.split(/[?#]/, 1)[0].replace(/^\/+/, '').replace(/\/+$/, '');
+    const pathParts = repositoryPath.split('/').filter(Boolean);
 
-    if (pathParts.length < 2 || !pathParts[0] || !pathParts[1]) {
+    if (pathParts.length !== 2) {
       return;
     }
 
     const owner = pathParts[0];
-    const name = pathParts.slice(1).join('/');
+    const name = pathParts[1];
     const articleText = $(element).text();
 
     repositories.push({
