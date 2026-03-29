@@ -12,7 +12,7 @@ Bootstrap for the Auto Git Trend Next.js app.
 
 - `npm run lint`
 - `npm run build`
-- `npm test`
+- `npm test` runs the Vitest smoke test suite once
 
 ## Environment Variables
 
