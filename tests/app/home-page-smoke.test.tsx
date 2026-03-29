@@ -19,7 +19,12 @@ describe("HomePage smoke test", () => {
 
     expect(getLatestSnapshotPageData).toHaveBeenCalled();
     expect(
-      screen.getByText("The latest GitHub Trending snapshot is not available yet."),
+      screen.getByRole("heading", {
+        name: "아직 오늘의 스냅샷이 도착하지 않았습니다",
+      }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("크론 수집이 끝나면 한국어 큐레이션과 함께 여기에 정리됩니다."),
     ).toBeInTheDocument();
     expect(
       screen.queryByText("Trending snapshots will render here later."),

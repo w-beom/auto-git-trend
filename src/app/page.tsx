@@ -1,4 +1,6 @@
 import { getLatestSnapshotPageData } from "@/lib/snapshots/queries";
+import { EmptyState } from "@/components/trending/empty-state";
+import { SiteShell } from "@/components/trending/site-shell";
 
 export const dynamic = "force-dynamic";
 
@@ -7,33 +9,13 @@ export default async function HomePage() {
 
   if (!snapshot) {
     return (
-      <main className="page">
-        <section aria-live="polite">
-          <p>The latest GitHub Trending snapshot is not available yet.</p>
-        </section>
-      </main>
+      <EmptyState
+        title="아직 오늘의 스냅샷이 도착하지 않았습니다"
+        description="크론 수집이 끝나면 한국어 큐레이션과 함께 여기에 정리됩니다."
+        kicker="DAILY SNAPSHOT"
+      />
     );
   }
 
-  return (
-    <main className="page">
-      <section aria-labelledby="snapshot-heading">
-        <h1 id="snapshot-heading">Trending snapshot for {snapshot.snapshotDate}</h1>
-        <p>{snapshot.capturedAtLabel}</p>
-        <p>{snapshot.totalCount} repositories captured</p>
-        <ol>
-          {snapshot.items.map((item) => (
-            <li key={`${snapshot.snapshotDate}-${item.rank}`}>
-              <article>
-                <p>#{item.rank}</p>
-                <h2>{item.fullName}</h2>
-                {item.description ? <p>{item.description}</p> : null}
-                <p>{item.summaryKo}</p>
-              </article>
-            </li>
-          ))}
-        </ol>
-      </section>
-    </main>
-  );
+  return <SiteShell snapshot={snapshot} mode="latest" />;
 }
