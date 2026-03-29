@@ -3,19 +3,18 @@ import { describe, expect, it } from "vitest";
 import HomePage from "@/app/page";
 
 describe("HomePage smoke test", () => {
-  it("renders only the safe empty state when no latest snapshot is available", async () => {
-    render(await HomePage());
+  it("renders the real placeholder heading and body copy", () => {
+    render(<HomePage />);
 
     expect(
-      screen.getByText("The latest GitHub Trending snapshot is not available yet."),
+      screen.getByRole("heading", {
+        name: "Trending snapshots will render here later.",
+      }),
     ).toBeInTheDocument();
     expect(
-      screen.queryByText("Trending snapshots will render here later."),
-    ).not.toBeInTheDocument();
-    expect(
-      screen.queryByText(
+      screen.getByText(
         "The base app is ready for the daily GitHub Trending pipeline and future archive views.",
       ),
-    ).not.toBeInTheDocument();
+    ).toBeInTheDocument();
   });
 });
