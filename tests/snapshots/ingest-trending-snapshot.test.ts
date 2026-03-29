@@ -54,6 +54,10 @@ function createSupabaseClientDouble(handlers: {
     data: unknown;
     error: { message: string; code?: string } | null;
   }>;
+  insertDirect?: (input: {
+    table: string;
+    payload: Record<string, unknown>;
+  }) => Promise<{ error: { message: string; code?: string } | null }>;
   updateMaybeSingle?: (input: {
     table: string;
     payload: Record<string, unknown>;
@@ -89,6 +93,13 @@ function createSupabaseClientDouble(handlers: {
           };
         },
         insert(payload: Record<string, unknown>) {
+          const directPromise = handlers.insertDirect
+            ? handlers.insertDirect({
+                table,
+                payload,
+              })
+            : Promise.resolve({ error: null });
+
           return {
             select(columns: string) {
               return {
@@ -105,6 +116,9 @@ function createSupabaseClientDouble(handlers: {
                 },
               };
             },
+            then: directPromise.then.bind(directPromise),
+            catch: directPromise.catch.bind(directPromise),
+            finally: directPromise.finally.bind(directPromise),
           };
         },
         update(payload: Record<string, unknown>) {
@@ -186,7 +200,10 @@ describe("ingestTrendingSnapshot", () => {
       .fn()
       .mockResolvedValueOnce({ id: "repo-beta" })
       .mockResolvedValueOnce({ id: "repo-acme" });
-    const insertSnapshotItem = vi.fn().mockResolvedValue(undefined);
+    const insertSnapshotItem = vi
+      .fn()
+      .mockResolvedValueOnce("lease-2")
+      .mockResolvedValueOnce("lease-3");
     const markSnapshotSuccess = vi.fn().mockResolvedValue(undefined);
     const markSnapshotFailed = vi.fn().mockResolvedValue(undefined);
     const summarize = vi
@@ -245,25 +262,35 @@ describe("ingestTrendingSnapshot", () => {
       description: "Orbit control center.",
       readme: null,
     });
-    expect(insertSnapshotItem).toHaveBeenNthCalledWith(1, {
-      snapshotId: "snapshot-1",
-      repositoryId: "repo-beta",
-      rank: 2,
-      starsToday: 95,
-      repoDescriptionSnapshot: "Orbit control center.",
-      readmeExcerpt: null,
-      summaryKo: "요약:beta/orbit:Orbit control center.:없음",
-    });
-    expect(insertSnapshotItem).toHaveBeenNthCalledWith(2, {
-      snapshotId: "snapshot-1",
-      repositoryId: "repo-acme",
-      rank: 1,
-      starsToday: 120,
-      repoDescriptionSnapshot: "A fast launch platform.",
-      readmeExcerpt: "# Rocket\nLaunch docs",
-      summaryKo: "요약:acme/rocket:A fast launch platform.:# Rocket\nLaunch docs",
-    });
-    expect(markSnapshotSuccess).toHaveBeenCalledWith("snapshot-1", 2, "lease-1");
+    expect(insertSnapshotItem).toHaveBeenNthCalledWith(
+      1,
+      {
+        snapshotId: "snapshot-1",
+        repositoryId: "repo-beta",
+        rank: 2,
+        starsToday: 95,
+        repoDescriptionSnapshot: "Orbit control center.",
+        readmeExcerpt: null,
+        summaryKo: "요약:beta/orbit:Orbit control center.:없음",
+      },
+      "lease-1",
+      expect.any(Date),
+    );
+    expect(insertSnapshotItem).toHaveBeenNthCalledWith(
+      2,
+      {
+        snapshotId: "snapshot-1",
+        repositoryId: "repo-acme",
+        rank: 1,
+        starsToday: 120,
+        repoDescriptionSnapshot: "A fast launch platform.",
+        readmeExcerpt: "# Rocket\nLaunch docs",
+        summaryKo: "요약:acme/rocket:A fast launch platform.:# Rocket\nLaunch docs",
+      },
+      "lease-2",
+      expect.any(Date),
+    );
+    expect(markSnapshotSuccess).toHaveBeenCalledWith("snapshot-1", 2, "lease-3");
     expect(markSnapshotFailed).not.toHaveBeenCalled();
   });
 
@@ -388,7 +415,7 @@ describe("ingestTrendingSnapshot", () => {
   });
 
   it("downgrades thrown README fetch errors to null and continues persisting the item", async () => {
-    const insertSnapshotItem = vi.fn().mockResolvedValue(undefined);
+    const insertSnapshotItem = vi.fn().mockResolvedValue("lease-readme-2");
     const markSnapshotSuccess = vi.fn().mockResolvedValue(undefined);
     const markSnapshotFailed = vi.fn().mockResolvedValue(undefined);
     const summarize = vi.fn().mockResolvedValue("README 없이도 요약");
@@ -431,25 +458,34 @@ describe("ingestTrendingSnapshot", () => {
       description: "A fast launch platform.",
       readme: null,
     });
-    expect(insertSnapshotItem).toHaveBeenCalledWith({
-      snapshotId: "snapshot-readme-fallback",
-      repositoryId: "repo-1",
-      rank: 1,
-      starsToday: 120,
-      repoDescriptionSnapshot: "A fast launch platform.",
-      readmeExcerpt: null,
-      summaryKo: "README 없이도 요약",
-    });
+    expect(insertSnapshotItem).toHaveBeenCalledWith(
+      {
+        snapshotId: "snapshot-readme-fallback",
+        repositoryId: "repo-1",
+        rank: 1,
+        starsToday: 120,
+        repoDescriptionSnapshot: "A fast launch platform.",
+        readmeExcerpt: null,
+        summaryKo: "README 없이도 요약",
+      },
+      "lease-readme",
+      expect.any(Date),
+    );
     expect(markSnapshotSuccess).toHaveBeenCalledWith(
       "snapshot-readme-fallback",
       1,
-      "lease-readme",
+      "lease-readme-2",
     );
     expect(markSnapshotFailed).not.toHaveBeenCalled();
   });
 
-  it("refreshes the running snapshot lease after claiming and after persisted progress", async () => {
-    const heartbeatSnapshot = vi.fn().mockResolvedValue(undefined);
+  it("refreshes the running snapshot lease after claiming and during persisted progress", async () => {
+    const heartbeatSnapshot = vi.fn().mockResolvedValue("lease-1");
+    const insertSnapshotItem = vi
+      .fn()
+      .mockResolvedValueOnce("lease-2")
+      .mockResolvedValueOnce("lease-3");
+    const markSnapshotSuccess = vi.fn().mockResolvedValue(undefined);
     const timestamps = [
       new Date("2026-03-29T00:00:00.000Z"),
       new Date("2026-03-29T00:05:00.000Z"),
@@ -488,38 +524,48 @@ describe("ingestTrendingSnapshot", () => {
           snapshotId: "snapshot-heartbeat",
           leaseToken: "lease-0",
         }),
-        heartbeatSnapshot: heartbeatSnapshot
-          .mockResolvedValueOnce("lease-1")
-          .mockResolvedValueOnce("lease-2")
-          .mockResolvedValueOnce("lease-3"),
+        heartbeatSnapshot,
         upsertRepository: vi
           .fn()
           .mockResolvedValueOnce({ id: "repo-1" })
           .mockResolvedValueOnce({ id: "repo-2" }),
-        insertSnapshotItem: vi.fn().mockResolvedValue(undefined),
-        markSnapshotSuccess: vi.fn().mockResolvedValue(undefined),
+        insertSnapshotItem,
+        markSnapshotSuccess,
         markSnapshotFailed: vi.fn().mockResolvedValue(undefined),
       },
     });
 
     expect(result.itemCount).toBe(2);
-    expect(heartbeatSnapshot).toHaveBeenNthCalledWith(
-      1,
+    expect(heartbeatSnapshot).toHaveBeenCalledTimes(1);
+    expect(heartbeatSnapshot).toHaveBeenCalledWith(
       "snapshot-heartbeat",
       "lease-0",
       new Date("2026-03-29T00:05:00.000Z"),
     );
-    expect(heartbeatSnapshot).toHaveBeenNthCalledWith(
-      2,
-      "snapshot-heartbeat",
+    expect(insertSnapshotItem).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        snapshotId: "snapshot-heartbeat",
+        repositoryId: "repo-1",
+        rank: 1,
+      }),
       "lease-1",
       new Date("2026-03-29T00:10:00.000Z"),
     );
-    expect(heartbeatSnapshot).toHaveBeenNthCalledWith(
-      3,
-      "snapshot-heartbeat",
+    expect(insertSnapshotItem).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        snapshotId: "snapshot-heartbeat",
+        repositoryId: "repo-2",
+        rank: 2,
+      }),
       "lease-2",
       new Date("2026-03-29T00:15:00.000Z"),
+    );
+    expect(markSnapshotSuccess).toHaveBeenCalledWith(
+      "snapshot-heartbeat",
+      2,
+      "lease-3",
     );
   });
 });
@@ -715,6 +761,106 @@ describe("createSupabaseSnapshotStore", () => {
       store.markSnapshotSuccess("snapshot-running", 1, "2026-03-29T00:00:00.000Z"),
     ).rejects.toThrow("Snapshot lease lost for snapshot-running");
     expect(deleteCount).toBe(1);
+  });
+
+  it("rejects stale item persistence before any snapshot item row is written", async () => {
+    let snapshot = {
+      id: "snapshot-running",
+      status: "running",
+      captured_at: "2026-03-29T00:00:00.000Z",
+    };
+    let itemInsertCount = 0;
+    const store = createSupabaseSnapshotStore(
+      createSupabaseClientDouble({
+        selectMaybeSingle: async ({ filters }) => {
+          const matches = filters.every(([field, value]) => {
+            const key = field as "id" | "snapshot_date";
+
+            if (key === "snapshot_date") {
+              return value === "2026-03-29";
+            }
+
+            return snapshot.id === value;
+          });
+
+          return {
+            data: matches ? { ...snapshot } : null,
+            error: null,
+          };
+        },
+        updateMaybeSingle: async ({ payload, filters }) => {
+          const matches = filters.every(([field, value]) => {
+            if (field === "id") {
+              return snapshot.id === value;
+            }
+
+            if (field === "status") {
+              return snapshot.status === value;
+            }
+
+            if (field === "captured_at") {
+              return snapshot.captured_at === value;
+            }
+
+            return false;
+          });
+
+          if (!matches) {
+            return {
+              data: null,
+              error: null,
+            };
+          }
+
+          snapshot = {
+            ...snapshot,
+            ...payload,
+          } as typeof snapshot;
+
+          return {
+            data: { ...snapshot },
+            error: null,
+          };
+        },
+        deleteEq: async () => ({
+          error: null,
+        }),
+        insertDirect: async () => {
+          itemInsertCount += 1;
+
+          return {
+            error: null,
+          };
+        },
+      }),
+    );
+
+    const reclaimed = await store.prepareSnapshotRun({
+      snapshotDate: "2026-03-29",
+      capturedAt: new Date("2026-03-29T00:30:00.000Z"),
+    });
+
+    expect(reclaimed).toEqual({
+      kind: "ready",
+      snapshotId: "snapshot-running",
+      leaseToken: "2026-03-29T00:30:00.000Z",
+    });
+    await expect(
+      store.insertSnapshotItem(
+        {
+          snapshotId: "snapshot-running",
+          repositoryId: "repo-1",
+          rank: 1,
+          starsToday: 120,
+          repoDescriptionSnapshot: "desc",
+          readmeExcerpt: null,
+          summaryKo: "summary",
+        },
+        "2026-03-29T00:00:00.000Z",
+        new Date("2026-03-29T00:35:00.000Z"),
+      ),
+    ).rejects.toThrow("Snapshot lease lost for snapshot-running");
+    expect(itemInsertCount).toBe(0);
   });
 
   it("reuses a failed snapshot by resetting it to running and clearing prior items", async () => {

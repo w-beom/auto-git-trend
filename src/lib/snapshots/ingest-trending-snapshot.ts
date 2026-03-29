@@ -58,7 +58,11 @@ export interface IngestTrendingSnapshotStore {
     capturedAt: Date,
   ) => Promise<string>;
   upsertRepository(payload: RepositoryUpsertPayload): Promise<StoredRepositoryReference>;
-  insertSnapshotItem(payload: SnapshotItemInsertPayload): Promise<void>;
+  insertSnapshotItem(
+    payload: SnapshotItemInsertPayload,
+    leaseToken: string,
+    capturedAt: Date,
+  ): Promise<string>;
   markSnapshotSuccess(
     snapshotId: string,
     itemCount: number,
@@ -449,7 +453,29 @@ export function createSupabaseSnapshotStore(
 
       return data.captured_at ?? capturedAt.toISOString();
     },
-    async insertSnapshotItem(payload) {
+    async insertSnapshotItem(payload, leaseToken, capturedAt) {
+      const nextLeaseToken = capturedAt.toISOString();
+      const { data, error: claimError } = await client
+        .from("trending_snapshots")
+        .update({
+          captured_at: nextLeaseToken,
+        })
+        .eq("id", payload.snapshotId)
+        .eq("status", "running")
+        .eq("captured_at", leaseToken)
+        .select("id, status, captured_at")
+        .maybeSingle<SnapshotState>();
+
+      if (claimError) {
+        throw new Error(
+          `Failed to claim snapshot ${payload.snapshotId} before item insert: ${claimError.message}`,
+        );
+      }
+
+      if (!data) {
+        throw createLeaseLostError(payload.snapshotId);
+      }
+
       const { error } = await client.from("trending_snapshot_items").insert({
         snapshot_id: payload.snapshotId,
         repository_id: payload.repositoryId,
@@ -461,10 +487,29 @@ export function createSupabaseSnapshotStore(
       });
 
       if (error) {
+        const revertResult = await client
+          .from("trending_snapshots")
+          .update({
+            status: "failed",
+          })
+          .eq("id", payload.snapshotId)
+          .eq("status", "running")
+          .eq("captured_at", nextLeaseToken)
+          .select("id, status, captured_at")
+          .maybeSingle<SnapshotState>();
+
+        if (revertResult.error) {
+          throw new Error(
+            `Failed to insert snapshot item for repository ${payload.repositoryId}: ${error.message}; failed to revert snapshot: ${revertResult.error.message}`,
+          );
+        }
+
         throw new Error(
           `Failed to insert snapshot item for repository ${payload.repositoryId}: ${error.message}`,
         );
       }
+
+      return data.captured_at ?? nextLeaseToken;
     },
     async markSnapshotSuccess(snapshotId, itemCount, leaseToken) {
       const { data, error } = await client
@@ -569,7 +614,7 @@ export async function ingestTrendingSnapshot(
         serializeRepositoryForUpsert(seed, repository),
       );
 
-      await dependencies.store.insertSnapshotItem(
+      currentLeaseToken = await dependencies.store.insertSnapshotItem(
         serializeSnapshotItemForInsert({
           snapshotId: snapshotRun.snapshotId,
           repositoryId: storedRepository.id,
@@ -578,9 +623,9 @@ export async function ingestTrendingSnapshot(
           readme,
           summaryKo,
         }),
+        currentLeaseToken,
+        resolveNow(dependencies.now),
       );
-
-      await heartbeat();
 
       items.push({
         rank: seed.rank,
