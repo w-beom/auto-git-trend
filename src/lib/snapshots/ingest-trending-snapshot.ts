@@ -28,6 +28,7 @@ type SnapshotStatus = "running" | "success" | "failed";
 
 interface SnapshotState extends SnapshotReference {
   status: SnapshotStatus;
+  captured_at?: string | null;
 }
 
 interface StoredRepositoryReference {
@@ -90,13 +91,15 @@ function isUniqueSnapshotDateViolation(error: { code?: string } | null): boolean
   return error?.code === "23505";
 }
 
+const RUNNING_SNAPSHOT_LEASE_MS = 15 * 60 * 1000;
+
 export function createSupabaseSnapshotStore(
   client: SupabaseClient,
 ): IngestTrendingSnapshotStore {
   async function getSnapshotByDate(snapshotDate: string): Promise<SnapshotState | null> {
     const { data, error } = await client
       .from("trending_snapshots")
-      .select("id, status")
+      .select("id, status, captured_at")
       .eq("snapshot_date", snapshotDate)
       .maybeSingle<SnapshotState>();
 
@@ -105,6 +108,30 @@ export function createSupabaseSnapshotStore(
     }
 
     return data;
+  }
+
+  async function getSnapshotById(snapshotId: string): Promise<SnapshotState | null> {
+    const { data, error } = await client
+      .from("trending_snapshots")
+      .select("id, status, captured_at")
+      .eq("id", snapshotId)
+      .maybeSingle<SnapshotState>();
+
+    if (error) {
+      throw new Error(`Failed to reload snapshot ${snapshotId}: ${error.message}`);
+    }
+
+    return data;
+  }
+
+  function isSnapshotStale(snapshot: SnapshotState, capturedAt: Date): boolean {
+    const snapshotCapturedAt = snapshot.captured_at ? Date.parse(snapshot.captured_at) : Number.NaN;
+
+    if (Number.isNaN(snapshotCapturedAt)) {
+      return true;
+    }
+
+    return capturedAt.getTime() - snapshotCapturedAt >= RUNNING_SNAPSHOT_LEASE_MS;
   }
 
   async function restartFailedSnapshot(input: {
@@ -120,7 +147,7 @@ export function createSupabaseSnapshotStore(
       })
       .eq("id", input.snapshotId)
       .eq("status", "failed")
-      .select("id, status")
+      .select("id, status, captured_at")
       .maybeSingle<SnapshotState>();
 
     if (error) {
@@ -128,30 +155,20 @@ export function createSupabaseSnapshotStore(
     }
 
     if (!data) {
-      const currentSnapshot = await client
-        .from("trending_snapshots")
-        .select("id, status")
-        .eq("id", input.snapshotId)
-        .maybeSingle<SnapshotState>();
+      const currentSnapshot = await getSnapshotById(input.snapshotId);
 
-      if (currentSnapshot.error) {
-        throw new Error(
-          `Failed to reload snapshot ${input.snapshotId}: ${currentSnapshot.error.message}`,
-        );
-      }
-
-      if (!currentSnapshot.data) {
+      if (!currentSnapshot) {
         throw new Error(`Snapshot ${input.snapshotId} disappeared during reset`);
       }
 
-      if (currentSnapshot.data.status === "failed") {
+      if (currentSnapshot.status === "failed") {
         throw new Error(`Snapshot ${input.snapshotId} could not be reset from failed state`);
       }
 
       return {
         kind: "skipped",
-        snapshotId: currentSnapshot.data.id,
-        reason: currentSnapshot.data.status,
+        snapshotId: currentSnapshot.id,
+        reason: currentSnapshot.status,
       };
     }
 
@@ -168,7 +185,7 @@ export function createSupabaseSnapshotStore(
         })
         .eq("id", input.snapshotId)
         .eq("status", "running")
-        .select("id, status")
+        .select("id, status, captured_at")
         .maybeSingle<SnapshotState>();
 
       if (revertResult.error) {
@@ -188,16 +205,107 @@ export function createSupabaseSnapshotStore(
     };
   }
 
+  async function reclaimStaleRunningSnapshot(input: {
+    snapshot: SnapshotState;
+    capturedAt: Date;
+  }): Promise<PrepareSnapshotRunResult> {
+    const previousCapturedAt = input.snapshot.captured_at;
+    const { data, error } = await client
+      .from("trending_snapshots")
+      .update({
+        status: "running",
+        item_count: 0,
+        captured_at: input.capturedAt.toISOString(),
+      })
+      .eq("id", input.snapshot.id)
+      .eq("status", "running")
+      .eq("captured_at", previousCapturedAt)
+      .select("id, status, captured_at")
+      .maybeSingle<SnapshotState>();
+
+    if (error) {
+      throw new Error(`Failed to reclaim stale snapshot ${input.snapshot.id}: ${error.message}`);
+    }
+
+    if (!data) {
+      const currentSnapshot = await getSnapshotById(input.snapshot.id);
+
+      if (!currentSnapshot) {
+        throw new Error(`Snapshot ${input.snapshot.id} disappeared during stale-run recovery`);
+      }
+
+      if (currentSnapshot.status === "failed") {
+        return restartFailedSnapshot({
+          snapshotId: currentSnapshot.id,
+          capturedAt: input.capturedAt,
+        });
+      }
+
+      return {
+        kind: "skipped",
+        snapshotId: currentSnapshot.id,
+        reason: currentSnapshot.status,
+      };
+    }
+
+    const { error: deleteError } = await client
+      .from("trending_snapshot_items")
+      .delete()
+      .eq("snapshot_id", input.snapshot.id);
+
+    if (deleteError) {
+      const revertResult = await client
+        .from("trending_snapshots")
+        .update({
+          status: "failed",
+        })
+        .eq("id", input.snapshot.id)
+        .eq("status", "running")
+        .select("id, status, captured_at")
+        .maybeSingle<SnapshotState>();
+
+      if (revertResult.error) {
+        throw new Error(
+          `Failed to clear snapshot items for ${input.snapshot.id}: ${deleteError.message}; failed to revert snapshot: ${revertResult.error.message}`,
+        );
+      }
+
+      throw new Error(
+        `Failed to clear snapshot items for ${input.snapshot.id}: ${deleteError.message}`,
+      );
+    }
+
+    return {
+      kind: "ready",
+      snapshotId: data.id,
+    };
+  }
+
   return {
     async prepareSnapshotRun(input) {
       const existingSnapshot = await getSnapshotByDate(input.snapshotDate);
 
-      if (existingSnapshot?.status === "success" || existingSnapshot?.status === "running") {
+      if (existingSnapshot?.status === "success") {
         return {
           kind: "skipped",
           snapshotId: existingSnapshot.id,
           reason: existingSnapshot.status,
         };
+      }
+
+      if (existingSnapshot?.status === "running") {
+        if (!isSnapshotStale(existingSnapshot, input.capturedAt)) {
+          return {
+            kind: "skipped",
+            snapshotId: existingSnapshot.id,
+            reason: existingSnapshot.status,
+          };
+        }
+
+        return reclaimStaleRunningSnapshot({
+          snapshot: existingSnapshot,
+          capturedAt: input.capturedAt,
+        });
       }
 
       if (existingSnapshot?.status === "failed") {
@@ -230,6 +338,16 @@ export function createSupabaseSnapshotStore(
           if (duplicateSnapshot.status === "failed") {
             return restartFailedSnapshot({
               snapshotId: duplicateSnapshot.id,
+              capturedAt: input.capturedAt,
+            });
+          }
+
+          if (
+            duplicateSnapshot.status === "running" &&
+            isSnapshotStale(duplicateSnapshot, input.capturedAt)
+          ) {
+            return reclaimStaleRunningSnapshot({
+              snapshot: duplicateSnapshot,
               capturedAt: input.capturedAt,
             });
           }
@@ -353,7 +471,12 @@ export async function ingestTrendingSnapshot(
         continue;
       }
 
-      const readme = await dependencies.fetchReadme(seed.owner, seed.name);
+      let readme: string | null;
+      try {
+        readme = await dependencies.fetchReadme(seed.owner, seed.name);
+      } catch {
+        readme = null;
+      }
       const summaryKo = await dependencies.summarize({
         fullName: seed.fullName,
         description: repository.description,
@@ -379,6 +502,10 @@ export async function ingestTrendingSnapshot(
         repositoryId: storedRepository.id,
         summaryKo: summaryKo.trim(),
       });
+    }
+
+    if (items.length === 0) {
+      throw new Error("Trending snapshot produced no persisted items");
     }
 
     await dependencies.store.markSnapshotSuccess(snapshotRun.snapshotId, items.length);

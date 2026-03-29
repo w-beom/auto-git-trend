@@ -327,9 +327,217 @@ describe("ingestTrendingSnapshot", () => {
     });
     expect(fetchTrendingSeeds).not.toHaveBeenCalled();
   });
+
+  it("marks the snapshot failed instead of succeeding when no seeds are available", async () => {
+    const markSnapshotSuccess = vi.fn().mockResolvedValue(undefined);
+    const markSnapshotFailed = vi.fn().mockResolvedValue(undefined);
+
+    await expect(
+      ingestTrendingSnapshot({
+        targetDate: "2026-03-29",
+        fetchTrendingSeeds: async () => [],
+        fetchRepository: vi.fn(),
+        fetchReadme: vi.fn(),
+        summarize: vi.fn(),
+        store: {
+          prepareSnapshotRun: vi.fn().mockResolvedValue({
+            kind: "ready",
+            snapshotId: "snapshot-empty",
+          }),
+          upsertRepository: vi.fn(),
+          insertSnapshotItem: vi.fn(),
+          markSnapshotSuccess,
+          markSnapshotFailed,
+        },
+      }),
+    ).rejects.toThrow("Trending snapshot produced no persisted items");
+
+    expect(markSnapshotSuccess).not.toHaveBeenCalled();
+    expect(markSnapshotFailed).toHaveBeenCalledWith("snapshot-empty");
+  });
+
+  it("marks the snapshot failed instead of succeeding when every candidate is skipped", async () => {
+    const markSnapshotSuccess = vi.fn().mockResolvedValue(undefined);
+    const markSnapshotFailed = vi.fn().mockResolvedValue(undefined);
+
+    await expect(
+      ingestTrendingSnapshot({
+        targetDate: "2026-03-29",
+        fetchTrendingSeeds: async () => [buildSeed()],
+        fetchRepository: async () => null,
+        fetchReadme: vi.fn(),
+        summarize: vi.fn(),
+        store: {
+          prepareSnapshotRun: vi.fn().mockResolvedValue({
+            kind: "ready",
+            snapshotId: "snapshot-skipped",
+          }),
+          upsertRepository: vi.fn(),
+          insertSnapshotItem: vi.fn(),
+          markSnapshotSuccess,
+          markSnapshotFailed,
+        },
+      }),
+    ).rejects.toThrow("Trending snapshot produced no persisted items");
+
+    expect(markSnapshotSuccess).not.toHaveBeenCalled();
+    expect(markSnapshotFailed).toHaveBeenCalledWith("snapshot-skipped");
+  });
+
+  it("downgrades thrown README fetch errors to null and continues persisting the item", async () => {
+    const insertSnapshotItem = vi.fn().mockResolvedValue(undefined);
+    const markSnapshotSuccess = vi.fn().mockResolvedValue(undefined);
+    const markSnapshotFailed = vi.fn().mockResolvedValue(undefined);
+    const summarize = vi.fn().mockResolvedValue("README 없이도 요약");
+
+    const result = await ingestTrendingSnapshot({
+      targetDate: "2026-03-29",
+      fetchTrendingSeeds: async () => [buildSeed()],
+      fetchRepository: async () => buildRepository(),
+      fetchReadme: async () => {
+        throw new Error("readme boom");
+      },
+      summarize,
+      store: {
+        prepareSnapshotRun: vi.fn().mockResolvedValue({
+          kind: "ready",
+          snapshotId: "snapshot-readme-fallback",
+        }),
+        upsertRepository: vi.fn().mockResolvedValue({ id: "repo-1" }),
+        insertSnapshotItem,
+        markSnapshotSuccess,
+        markSnapshotFailed,
+      },
+    });
+
+    expect(result).toEqual({
+      snapshotId: "snapshot-readme-fallback",
+      status: "created",
+      itemCount: 1,
+      items: [
+        {
+          rank: 1,
+          repositoryId: "repo-1",
+          summaryKo: "README 없이도 요약",
+        },
+      ],
+    });
+    expect(summarize).toHaveBeenCalledWith({
+      fullName: "acme/rocket",
+      description: "A fast launch platform.",
+      readme: null,
+    });
+    expect(insertSnapshotItem).toHaveBeenCalledWith({
+      snapshotId: "snapshot-readme-fallback",
+      repositoryId: "repo-1",
+      rank: 1,
+      starsToday: 120,
+      repoDescriptionSnapshot: "A fast launch platform.",
+      readmeExcerpt: null,
+      summaryKo: "README 없이도 요약",
+    });
+    expect(markSnapshotSuccess).toHaveBeenCalledWith("snapshot-readme-fallback", 1);
+    expect(markSnapshotFailed).not.toHaveBeenCalled();
+  });
 });
 
 describe("createSupabaseSnapshotStore", () => {
+  it("skips a fresh running snapshot without attempting recovery", async () => {
+    const events: string[] = [];
+    const store = createSupabaseSnapshotStore(
+      createSupabaseClientDouble({
+        selectMaybeSingle: async ({ table, filters }) => {
+          events.push(`select:${table}:${JSON.stringify(filters)}`);
+
+          return {
+            data: {
+              id: "snapshot-running",
+              status: "running",
+              captured_at: "2026-03-29T00:20:00.000Z",
+            },
+            error: null,
+          };
+        },
+        updateMaybeSingle: async ({ table, payload, filters }) => {
+          events.push(`update:${table}:${JSON.stringify(payload)}:${JSON.stringify(filters)}`);
+
+          return {
+            data: null,
+            error: null,
+          };
+        },
+      }),
+    );
+
+    const result = await store.prepareSnapshotRun({
+      snapshotDate: "2026-03-29",
+      capturedAt: new Date("2026-03-29T00:30:00.000Z"),
+    });
+
+    expect(result).toEqual({
+      kind: "skipped",
+      reason: "running",
+      snapshotId: "snapshot-running",
+    });
+    expect(events).toEqual([
+      'select:trending_snapshots:[["snapshot_date","2026-03-29"]]',
+    ]);
+  });
+
+  it("reclaims a stale running snapshot and clears prior items", async () => {
+    const events: string[] = [];
+    const store = createSupabaseSnapshotStore(
+      createSupabaseClientDouble({
+        selectMaybeSingle: async ({ table, filters }) => {
+          events.push(`select:${table}:${JSON.stringify(filters)}`);
+
+          return {
+            data: {
+              id: "snapshot-running",
+              status: "running",
+              captured_at: "2026-03-29T00:00:00.000Z",
+            },
+            error: null,
+          };
+        },
+        updateMaybeSingle: async ({ table, payload, filters }) => {
+          events.push(`update:${table}:${JSON.stringify(payload)}:${JSON.stringify(filters)}`);
+
+          return {
+            data: {
+              id: "snapshot-running",
+              status: "running",
+              captured_at: "2026-03-29T00:00:00.000Z",
+            },
+            error: null,
+          };
+        },
+        deleteEq: async ({ table, filters }) => {
+          events.push(`delete:${table}:${JSON.stringify(filters)}`);
+
+          return {
+            error: null,
+          };
+        },
+      }),
+    );
+
+    const result = await store.prepareSnapshotRun({
+      snapshotDate: "2026-03-29",
+      capturedAt: new Date("2026-03-29T00:30:00.000Z"),
+    });
+
+    expect(result).toEqual({
+      kind: "ready",
+      snapshotId: "snapshot-running",
+    });
+    expect(events).toEqual([
+      'select:trending_snapshots:[["snapshot_date","2026-03-29"]]',
+      'update:trending_snapshots:{"status":"running","item_count":0,"captured_at":"2026-03-29T00:30:00.000Z"}:[["id","snapshot-running"],["status","running"],["captured_at","2026-03-29T00:00:00.000Z"]]',
+      'delete:trending_snapshot_items:[["snapshot_id","snapshot-running"]]',
+    ]);
+  });
+
   it("reuses a failed snapshot by resetting it to running and clearing prior items", async () => {
     const events: string[] = [];
     const store = createSupabaseSnapshotStore(
@@ -513,6 +721,7 @@ describe("createSupabaseSnapshotStore", () => {
             data: {
               id: "snapshot-running",
               status: "running",
+              captured_at: "2026-03-29T00:00:00.000Z",
             },
             error: null,
           };
