@@ -1,6 +1,10 @@
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { describe, expect, it, vi } from "vitest";
 
-import { ingestTrendingSnapshot } from "@/lib/snapshots/ingest-trending-snapshot";
+import {
+  createSupabaseSnapshotStore,
+  ingestTrendingSnapshot,
+} from "@/lib/snapshots/ingest-trending-snapshot";
 import type {
   RepositoryMetadata,
   TrendingRepositorySeed,
@@ -36,6 +40,122 @@ function buildRepository(
   };
 }
 
+function createSupabaseClientDouble(handlers: {
+  selectMaybeSingle?: (input: {
+    table: string;
+    columns: string;
+    filters: Array<[string, unknown]>;
+  }) => Promise<{ data: unknown; error: { message: string } | null }>;
+  insertSingle?: (input: {
+    table: string;
+    payload: Record<string, unknown>;
+    columns: string;
+  }) => Promise<{
+    data: unknown;
+    error: { message: string; code?: string } | null;
+  }>;
+  updateMaybeSingle?: (input: {
+    table: string;
+    payload: Record<string, unknown>;
+    columns: string;
+    filters: Array<[string, unknown]>;
+  }) => Promise<{ data: unknown; error: { message: string } | null }>;
+  deleteEq?: (input: {
+    table: string;
+    filters: Array<[string, unknown]>;
+  }) => Promise<{ error: { message: string } | null }>;
+}): SupabaseClient {
+  return {
+    from(table: string) {
+      return {
+        select(columns: string) {
+          const filters: Array<[string, unknown]> = [];
+          return {
+            eq(field: string, value: unknown) {
+              filters.push([field, value]);
+              return this;
+            },
+            maybeSingle() {
+              if (!handlers.selectMaybeSingle) {
+                throw new Error("selectMaybeSingle handler not configured");
+              }
+
+              return handlers.selectMaybeSingle({
+                table,
+                columns,
+                filters,
+              });
+            },
+          };
+        },
+        insert(payload: Record<string, unknown>) {
+          return {
+            select(columns: string) {
+              return {
+                single() {
+                  if (!handlers.insertSingle) {
+                    throw new Error("insertSingle handler not configured");
+                  }
+
+                  return handlers.insertSingle({
+                    table,
+                    payload,
+                    columns,
+                  });
+                },
+              };
+            },
+          };
+        },
+        update(payload: Record<string, unknown>) {
+          const filters: Array<[string, unknown]> = [];
+
+          return {
+            eq(field: string, value: unknown) {
+              filters.push([field, value]);
+              return this;
+            },
+            select(columns: string) {
+              return {
+                maybeSingle() {
+                  if (!handlers.updateMaybeSingle) {
+                    throw new Error("updateMaybeSingle handler not configured");
+                  }
+
+                  return handlers.updateMaybeSingle({
+                    table,
+                    payload,
+                    columns,
+                    filters,
+                  });
+                },
+              };
+            },
+          };
+        },
+        delete() {
+          const filters: Array<[string, unknown]> = [];
+
+          return {
+            eq(field: string, value: unknown) {
+              filters.push([field, value]);
+
+              if (!handlers.deleteEq) {
+                throw new Error("deleteEq handler not configured");
+              }
+
+              return handlers.deleteEq({
+                table,
+                filters,
+              });
+            },
+          };
+        },
+      };
+    },
+  } as unknown as SupabaseClient;
+}
+
 describe("ingestTrendingSnapshot", () => {
   it("stores ranked items, falls back when README is missing, and preserves seed rank", async () => {
     const seeds = [
@@ -57,8 +177,10 @@ describe("ingestTrendingSnapshot", () => {
       })],
       ["acme/rocket", buildRepository()],
     ]);
-    const getSuccessfulSnapshotByDate = vi.fn().mockResolvedValue(null);
-    const createRunningSnapshot = vi.fn().mockResolvedValue({ id: "snapshot-1" });
+    const prepareSnapshotRun = vi.fn().mockResolvedValue({
+      kind: "ready",
+      snapshotId: "snapshot-1",
+    });
     const upsertRepository = vi
       .fn()
       .mockResolvedValueOnce({ id: "repo-beta" })
@@ -88,8 +210,7 @@ describe("ingestTrendingSnapshot", () => {
         owner === "beta" && name === "orbit" ? null : "# Rocket\nLaunch docs",
       summarize,
       store: {
-        getSuccessfulSnapshotByDate,
-        createRunningSnapshot,
+        prepareSnapshotRun,
         upsertRepository,
         insertSnapshotItem,
         markSnapshotSuccess,
@@ -114,8 +235,7 @@ describe("ingestTrendingSnapshot", () => {
         },
       ],
     });
-    expect(getSuccessfulSnapshotByDate).toHaveBeenCalledWith("2026-03-29");
-    expect(createRunningSnapshot).toHaveBeenCalledWith({
+    expect(prepareSnapshotRun).toHaveBeenCalledWith({
       capturedAt: expect.any(Date),
       snapshotDate: "2026-03-29",
     });
@@ -147,11 +267,7 @@ describe("ingestTrendingSnapshot", () => {
   });
 
   it("returns early when a successful snapshot already exists for the date", async () => {
-    const getSuccessfulSnapshotByDate = vi
-      .fn()
-      .mockResolvedValue({ id: "snapshot-existing" });
     const fetchTrendingSeeds = vi.fn();
-    const createRunningSnapshot = vi.fn();
 
     const result = await ingestTrendingSnapshot({
       targetDate: "2026-03-29",
@@ -160,8 +276,11 @@ describe("ingestTrendingSnapshot", () => {
       fetchReadme: vi.fn(),
       summarize: vi.fn(),
       store: {
-        getSuccessfulSnapshotByDate,
-        createRunningSnapshot,
+        prepareSnapshotRun: vi.fn().mockResolvedValue({
+          kind: "skipped",
+          reason: "success",
+          snapshotId: "snapshot-existing",
+        }),
         upsertRepository: vi.fn(),
         insertSnapshotItem: vi.fn(),
         markSnapshotSuccess: vi.fn(),
@@ -176,6 +295,133 @@ describe("ingestTrendingSnapshot", () => {
       items: [],
     });
     expect(fetchTrendingSeeds).not.toHaveBeenCalled();
-    expect(createRunningSnapshot).not.toHaveBeenCalled();
+  });
+
+  it("returns early when a snapshot for the date is already running", async () => {
+    const fetchTrendingSeeds = vi.fn();
+
+    const result = await ingestTrendingSnapshot({
+      targetDate: "2026-03-29",
+      fetchTrendingSeeds,
+      fetchRepository: vi.fn(),
+      fetchReadme: vi.fn(),
+      summarize: vi.fn(),
+      store: {
+        prepareSnapshotRun: vi.fn().mockResolvedValue({
+          kind: "skipped",
+          reason: "running",
+          snapshotId: "snapshot-running",
+        }),
+        upsertRepository: vi.fn(),
+        insertSnapshotItem: vi.fn(),
+        markSnapshotSuccess: vi.fn(),
+        markSnapshotFailed: vi.fn(),
+      },
+    });
+
+    expect(result).toEqual({
+      snapshotId: "snapshot-running",
+      status: "skipped",
+      itemCount: 0,
+      items: [],
+    });
+    expect(fetchTrendingSeeds).not.toHaveBeenCalled();
+  });
+});
+
+describe("createSupabaseSnapshotStore", () => {
+  it("reuses a failed snapshot by resetting it to running and clearing prior items", async () => {
+    const events: string[] = [];
+    const store = createSupabaseSnapshotStore(
+      createSupabaseClientDouble({
+        selectMaybeSingle: async ({ table, filters }) => {
+          events.push(`select:${table}:${JSON.stringify(filters)}`);
+
+          return {
+            data: {
+              id: "snapshot-failed",
+              status: "failed",
+            },
+            error: null,
+          };
+        },
+        updateMaybeSingle: async ({ table, payload, filters }) => {
+          events.push(`update:${table}:${JSON.stringify(payload)}:${JSON.stringify(filters)}`);
+
+          return {
+            data: {
+              id: "snapshot-failed",
+            },
+            error: null,
+          };
+        },
+        deleteEq: async ({ table, filters }) => {
+          events.push(`delete:${table}:${JSON.stringify(filters)}`);
+
+          return {
+            error: null,
+          };
+        },
+      }),
+    );
+
+    const result = await store.prepareSnapshotRun({
+      snapshotDate: "2026-03-29",
+      capturedAt: new Date("2026-03-29T00:00:00.000Z"),
+    });
+
+    expect(result).toEqual({
+      kind: "ready",
+      snapshotId: "snapshot-failed",
+    });
+    expect(events).toEqual([
+      'select:trending_snapshots:[["snapshot_date","2026-03-29"]]',
+      'update:trending_snapshots:{"status":"running","item_count":0,"captured_at":"2026-03-29T00:00:00.000Z"}:[["id","snapshot-failed"],["status","failed"]]',
+      'delete:trending_snapshot_items:[["snapshot_id","snapshot-failed"]]',
+    ]);
+  });
+
+  it("skips safely when a concurrent insert loses the snapshot_date race to a running snapshot", async () => {
+    let selectCount = 0;
+    const store = createSupabaseSnapshotStore(
+      createSupabaseClientDouble({
+        selectMaybeSingle: async () => {
+          selectCount += 1;
+
+          if (selectCount === 1) {
+            return {
+              data: null,
+              error: null,
+            };
+          }
+
+          return {
+            data: {
+              id: "snapshot-running",
+              status: "running",
+            },
+            error: null,
+          };
+        },
+        insertSingle: async () => ({
+          data: null,
+          error: {
+            code: "23505",
+            message: "duplicate key value violates unique constraint",
+          },
+        }),
+      }),
+    );
+
+    const result = await store.prepareSnapshotRun({
+      snapshotDate: "2026-03-29",
+      capturedAt: new Date("2026-03-29T00:00:00.000Z"),
+    });
+
+    expect(result).toEqual({
+      kind: "skipped",
+      reason: "running",
+      snapshotId: "snapshot-running",
+    });
   });
 });

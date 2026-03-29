@@ -24,16 +24,32 @@ interface SnapshotReference {
   id: string;
 }
 
+type SnapshotStatus = "running" | "success" | "failed";
+
+interface SnapshotState extends SnapshotReference {
+  status: SnapshotStatus;
+}
+
 interface StoredRepositoryReference {
   id: string;
 }
 
+export type PrepareSnapshotRunResult =
+  | {
+      kind: "ready";
+      snapshotId: string;
+    }
+  | {
+      kind: "skipped";
+      snapshotId: string;
+      reason: "running" | "success";
+    };
+
 export interface IngestTrendingSnapshotStore {
-  getSuccessfulSnapshotByDate(snapshotDate: string): Promise<SnapshotReference | null>;
-  createRunningSnapshot(input: {
+  prepareSnapshotRun(input: {
     snapshotDate: string;
     capturedAt: Date;
-  }): Promise<SnapshotReference>;
+  }): Promise<PrepareSnapshotRunResult>;
   upsertRepository(payload: RepositoryUpsertPayload): Promise<StoredRepositoryReference>;
   insertSnapshotItem(payload: SnapshotItemInsertPayload): Promise<void>;
   markSnapshotSuccess(snapshotId: string, itemCount: number): Promise<void>;
@@ -70,25 +86,111 @@ export interface IngestTrendingSnapshotResult {
   items: IngestTrendingSnapshotResultItem[];
 }
 
-function createSupabaseSnapshotStore(
+function isUniqueSnapshotDateViolation(error: { code?: string } | null): boolean {
+  return error?.code === "23505";
+}
+
+export function createSupabaseSnapshotStore(
   client: SupabaseClient,
 ): IngestTrendingSnapshotStore {
-  return {
-    async getSuccessfulSnapshotByDate(snapshotDate) {
-      const { data, error } = await client
-        .from("trending_snapshots")
-        .select("id")
-        .eq("snapshot_date", snapshotDate)
-        .eq("status", "success")
-        .maybeSingle<{ id: string }>();
+  async function getSnapshotByDate(snapshotDate: string): Promise<SnapshotState | null> {
+    const { data, error } = await client
+      .from("trending_snapshots")
+      .select("id, status")
+      .eq("snapshot_date", snapshotDate)
+      .maybeSingle<SnapshotState>();
 
-      if (error) {
-        throw new Error(`Failed to load snapshot for ${snapshotDate}: ${error.message}`);
+    if (error) {
+      throw new Error(`Failed to load snapshot for ${snapshotDate}: ${error.message}`);
+    }
+
+    return data;
+  }
+
+  async function restartFailedSnapshot(input: {
+    snapshotId: string;
+    capturedAt: Date;
+  }): Promise<PrepareSnapshotRunResult> {
+    const { data, error } = await client
+      .from("trending_snapshots")
+      .update({
+        status: "running",
+        item_count: 0,
+        captured_at: input.capturedAt.toISOString(),
+      })
+      .eq("id", input.snapshotId)
+      .eq("status", "failed")
+      .select("id, status")
+      .maybeSingle<SnapshotState>();
+
+    if (error) {
+      throw new Error(`Failed to reset snapshot ${input.snapshotId}: ${error.message}`);
+    }
+
+    if (!data) {
+      const currentSnapshot = await client
+        .from("trending_snapshots")
+        .select("id, status")
+        .eq("id", input.snapshotId)
+        .maybeSingle<SnapshotState>();
+
+      if (currentSnapshot.error) {
+        throw new Error(
+          `Failed to reload snapshot ${input.snapshotId}: ${currentSnapshot.error.message}`,
+        );
       }
 
-      return data;
-    },
-    async createRunningSnapshot(input) {
+      if (!currentSnapshot.data) {
+        throw new Error(`Snapshot ${input.snapshotId} disappeared during reset`);
+      }
+
+      if (currentSnapshot.data.status === "failed") {
+        throw new Error(`Snapshot ${input.snapshotId} could not be reset from failed state`);
+      }
+
+      return {
+        kind: "skipped",
+        snapshotId: currentSnapshot.data.id,
+        reason: currentSnapshot.data.status,
+      };
+    }
+
+    const { error: deleteError } = await client
+      .from("trending_snapshot_items")
+      .delete()
+      .eq("snapshot_id", input.snapshotId);
+
+    if (deleteError) {
+      throw new Error(
+        `Failed to clear snapshot items for ${input.snapshotId}: ${deleteError.message}`,
+      );
+    }
+
+    return {
+      kind: "ready",
+      snapshotId: data.id,
+    };
+  }
+
+  return {
+    async prepareSnapshotRun(input) {
+      const existingSnapshot = await getSnapshotByDate(input.snapshotDate);
+
+      if (existingSnapshot?.status === "success" || existingSnapshot?.status === "running") {
+        return {
+          kind: "skipped",
+          snapshotId: existingSnapshot.id,
+          reason: existingSnapshot.status,
+        };
+      }
+
+      if (existingSnapshot?.status === "failed") {
+        return restartFailedSnapshot({
+          snapshotId: existingSnapshot.id,
+          capturedAt: input.capturedAt,
+        });
+      }
+
       const { data, error } = await client
         .from("trending_snapshots")
         .insert({
@@ -100,10 +202,36 @@ function createSupabaseSnapshotStore(
         .single<{ id: string }>();
 
       if (error) {
+        if (isUniqueSnapshotDateViolation(error)) {
+          const duplicateSnapshot = await getSnapshotByDate(input.snapshotDate);
+
+          if (!duplicateSnapshot) {
+            throw new Error(
+              `Snapshot for ${input.snapshotDate} already exists but could not be reloaded`,
+            );
+          }
+
+          if (duplicateSnapshot.status === "failed") {
+            return restartFailedSnapshot({
+              snapshotId: duplicateSnapshot.id,
+              capturedAt: input.capturedAt,
+            });
+          }
+
+          return {
+            kind: "skipped",
+            snapshotId: duplicateSnapshot.id,
+            reason: duplicateSnapshot.status,
+          };
+        }
+
         throw new Error(`Failed to create running snapshot: ${error.message}`);
       }
 
-      return data;
+      return {
+        kind: "ready",
+        snapshotId: data.id,
+      };
     },
     async upsertRepository(payload) {
       const { data, error } = await client
@@ -184,23 +312,19 @@ function createSupabaseSnapshotStore(
 export async function ingestTrendingSnapshot(
   dependencies: IngestTrendingSnapshotDependencies,
 ): Promise<IngestTrendingSnapshotResult> {
-  const existingSnapshot = await dependencies.store.getSuccessfulSnapshotByDate(
-    dependencies.targetDate,
-  );
+  const snapshotRun = await dependencies.store.prepareSnapshotRun({
+    snapshotDate: dependencies.targetDate,
+    capturedAt: dependencies.now ?? new Date(),
+  });
 
-  if (existingSnapshot) {
+  if (snapshotRun.kind === "skipped") {
     return {
-      snapshotId: existingSnapshot.id,
+      snapshotId: snapshotRun.snapshotId,
       status: "skipped",
       itemCount: 0,
       items: [],
     };
   }
-
-  const snapshot = await dependencies.store.createRunningSnapshot({
-    snapshotDate: dependencies.targetDate,
-    capturedAt: dependencies.now ?? new Date(),
-  });
 
   try {
     const seeds = await dependencies.fetchTrendingSeeds();
@@ -225,7 +349,7 @@ export async function ingestTrendingSnapshot(
 
       await dependencies.store.insertSnapshotItem(
         serializeSnapshotItemForInsert({
-          snapshotId: snapshot.id,
+          snapshotId: snapshotRun.snapshotId,
           repositoryId: storedRepository.id,
           seed,
           repository,
@@ -241,16 +365,16 @@ export async function ingestTrendingSnapshot(
       });
     }
 
-    await dependencies.store.markSnapshotSuccess(snapshot.id, items.length);
+    await dependencies.store.markSnapshotSuccess(snapshotRun.snapshotId, items.length);
 
     return {
-      snapshotId: snapshot.id,
+      snapshotId: snapshotRun.snapshotId,
       status: "created",
       itemCount: items.length,
       items,
     };
   } catch (error) {
-    await dependencies.store.markSnapshotFailed(snapshot.id);
+    await dependencies.store.markSnapshotFailed(snapshotRun.snapshotId);
     throw error;
   }
 }
