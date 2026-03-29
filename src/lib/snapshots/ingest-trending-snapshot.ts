@@ -39,6 +39,7 @@ export type PrepareSnapshotRunResult =
   | {
       kind: "ready";
       snapshotId: string;
+      leaseToken: string;
     }
   | {
       kind: "skipped";
@@ -51,11 +52,19 @@ export interface IngestTrendingSnapshotStore {
     snapshotDate: string;
     capturedAt: Date;
   }): Promise<PrepareSnapshotRunResult>;
-  heartbeatSnapshot?: (snapshotId: string, capturedAt: Date) => Promise<void>;
+  heartbeatSnapshot?: (
+    snapshotId: string,
+    leaseToken: string,
+    capturedAt: Date,
+  ) => Promise<string>;
   upsertRepository(payload: RepositoryUpsertPayload): Promise<StoredRepositoryReference>;
   insertSnapshotItem(payload: SnapshotItemInsertPayload): Promise<void>;
-  markSnapshotSuccess(snapshotId: string, itemCount: number): Promise<void>;
-  markSnapshotFailed(snapshotId: string): Promise<void>;
+  markSnapshotSuccess(
+    snapshotId: string,
+    itemCount: number,
+    leaseToken: string,
+  ): Promise<void>;
+  markSnapshotFailed(snapshotId: string, leaseToken: string): Promise<void>;
 }
 
 export interface IngestTrendingSnapshotDependencies {
@@ -98,6 +107,14 @@ function resolveNow(now: IngestTrendingSnapshotDependencies["now"]): Date {
 
 function isUniqueSnapshotDateViolation(error: { code?: string } | null): boolean {
   return error?.code === "23505";
+}
+
+function createLeaseLostError(snapshotId: string): Error {
+  return new Error(`Snapshot lease lost for ${snapshotId}`);
+}
+
+function isLeaseLostError(error: unknown): boolean {
+  return error instanceof Error && error.message.startsWith("Snapshot lease lost for ");
 }
 
 const RUNNING_SNAPSHOT_LEASE_MS = 15 * 60 * 1000;
@@ -211,6 +228,7 @@ export function createSupabaseSnapshotStore(
     return {
       kind: "ready",
       snapshotId: data.id,
+      leaseToken: data.captured_at ?? input.capturedAt.toISOString(),
     };
   }
 
@@ -287,6 +305,7 @@ export function createSupabaseSnapshotStore(
     return {
       kind: "ready",
       snapshotId: data.id,
+      leaseToken: data.captured_at ?? input.capturedAt.toISOString(),
     };
   }
 
@@ -374,6 +393,7 @@ export function createSupabaseSnapshotStore(
       return {
         kind: "ready",
         snapshotId: data.id,
+        leaseToken: input.capturedAt.toISOString(),
       };
     },
     async upsertRepository(payload) {
@@ -407,7 +427,7 @@ export function createSupabaseSnapshotStore(
 
       return data;
     },
-    async heartbeatSnapshot(snapshotId, capturedAt) {
+    async heartbeatSnapshot(snapshotId, leaseToken, capturedAt) {
       const { data, error } = await client
         .from("trending_snapshots")
         .update({
@@ -415,6 +435,7 @@ export function createSupabaseSnapshotStore(
         })
         .eq("id", snapshotId)
         .eq("status", "running")
+        .eq("captured_at", leaseToken)
         .select("id, status, captured_at")
         .maybeSingle<SnapshotState>();
 
@@ -423,8 +444,10 @@ export function createSupabaseSnapshotStore(
       }
 
       if (!data) {
-        throw new Error(`Snapshot ${snapshotId} is no longer running for heartbeat`);
+        throw createLeaseLostError(snapshotId);
       }
+
+      return data.captured_at ?? capturedAt.toISOString();
     },
     async insertSnapshotItem(payload) {
       const { error } = await client.from("trending_snapshot_items").insert({
@@ -443,29 +466,45 @@ export function createSupabaseSnapshotStore(
         );
       }
     },
-    async markSnapshotSuccess(snapshotId, itemCount) {
-      const { error } = await client
+    async markSnapshotSuccess(snapshotId, itemCount, leaseToken) {
+      const { data, error } = await client
         .from("trending_snapshots")
         .update({
           status: "success",
           item_count: itemCount,
         })
-        .eq("id", snapshotId);
+        .eq("id", snapshotId)
+        .eq("status", "running")
+        .eq("captured_at", leaseToken)
+        .select("id, status, captured_at")
+        .maybeSingle<SnapshotState>();
 
       if (error) {
         throw new Error(`Failed to mark snapshot ${snapshotId} successful: ${error.message}`);
       }
+
+      if (!data) {
+        throw createLeaseLostError(snapshotId);
+      }
     },
-    async markSnapshotFailed(snapshotId) {
-      const { error } = await client
+    async markSnapshotFailed(snapshotId, leaseToken) {
+      const { data, error } = await client
         .from("trending_snapshots")
         .update({
           status: "failed",
         })
-        .eq("id", snapshotId);
+        .eq("id", snapshotId)
+        .eq("status", "running")
+        .eq("captured_at", leaseToken)
+        .select("id, status, captured_at")
+        .maybeSingle<SnapshotState>();
 
       if (error) {
         throw new Error(`Failed to mark snapshot ${snapshotId} failed: ${error.message}`);
+      }
+
+      if (!data) {
+        throw createLeaseLostError(snapshotId);
       }
     },
   };
@@ -488,11 +527,22 @@ export async function ingestTrendingSnapshot(
     };
   }
 
-  try {
-    await dependencies.store.heartbeatSnapshot?.(
+  let currentLeaseToken = snapshotRun.leaseToken;
+
+  async function heartbeat(): Promise<void> {
+    if (!dependencies.store.heartbeatSnapshot) {
+      return;
+    }
+
+    currentLeaseToken = await dependencies.store.heartbeatSnapshot(
       snapshotRun.snapshotId,
+      currentLeaseToken,
       resolveNow(dependencies.now),
     );
+  }
+
+  try {
+    await heartbeat();
 
     const seeds = await dependencies.fetchTrendingSeeds();
     const items: IngestTrendingSnapshotResultItem[] = [];
@@ -530,10 +580,7 @@ export async function ingestTrendingSnapshot(
         }),
       );
 
-      await dependencies.store.heartbeatSnapshot?.(
-        snapshotRun.snapshotId,
-        resolveNow(dependencies.now),
-      );
+      await heartbeat();
 
       items.push({
         rank: seed.rank,
@@ -546,7 +593,11 @@ export async function ingestTrendingSnapshot(
       throw new Error("Trending snapshot produced no persisted items");
     }
 
-    await dependencies.store.markSnapshotSuccess(snapshotRun.snapshotId, items.length);
+    await dependencies.store.markSnapshotSuccess(
+      snapshotRun.snapshotId,
+      items.length,
+      currentLeaseToken,
+    );
 
     return {
       snapshotId: snapshotRun.snapshotId,
@@ -555,7 +606,16 @@ export async function ingestTrendingSnapshot(
       items,
     };
   } catch (error) {
-    await dependencies.store.markSnapshotFailed(snapshotRun.snapshotId);
+    try {
+      await dependencies.store.markSnapshotFailed(snapshotRun.snapshotId, currentLeaseToken);
+    } catch (markFailedError) {
+      if (isLeaseLostError(markFailedError)) {
+        throw error;
+      }
+
+      throw markFailedError;
+    }
+
     throw error;
   }
 }

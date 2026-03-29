@@ -180,6 +180,7 @@ describe("ingestTrendingSnapshot", () => {
     const prepareSnapshotRun = vi.fn().mockResolvedValue({
       kind: "ready",
       snapshotId: "snapshot-1",
+      leaseToken: "lease-1",
     });
     const upsertRepository = vi
       .fn()
@@ -262,7 +263,7 @@ describe("ingestTrendingSnapshot", () => {
       readmeExcerpt: "# Rocket\nLaunch docs",
       summaryKo: "요약:acme/rocket:A fast launch platform.:# Rocket\nLaunch docs",
     });
-    expect(markSnapshotSuccess).toHaveBeenCalledWith("snapshot-1", 2);
+    expect(markSnapshotSuccess).toHaveBeenCalledWith("snapshot-1", 2, "lease-1");
     expect(markSnapshotFailed).not.toHaveBeenCalled();
   });
 
@@ -343,6 +344,7 @@ describe("ingestTrendingSnapshot", () => {
           prepareSnapshotRun: vi.fn().mockResolvedValue({
             kind: "ready",
             snapshotId: "snapshot-empty",
+            leaseToken: "lease-empty",
           }),
           upsertRepository: vi.fn(),
           insertSnapshotItem: vi.fn(),
@@ -353,7 +355,7 @@ describe("ingestTrendingSnapshot", () => {
     ).rejects.toThrow("Trending snapshot produced no persisted items");
 
     expect(markSnapshotSuccess).not.toHaveBeenCalled();
-    expect(markSnapshotFailed).toHaveBeenCalledWith("snapshot-empty");
+    expect(markSnapshotFailed).toHaveBeenCalledWith("snapshot-empty", "lease-empty");
   });
 
   it("marks the snapshot failed instead of succeeding when every candidate is skipped", async () => {
@@ -371,6 +373,7 @@ describe("ingestTrendingSnapshot", () => {
           prepareSnapshotRun: vi.fn().mockResolvedValue({
             kind: "ready",
             snapshotId: "snapshot-skipped",
+            leaseToken: "lease-skipped",
           }),
           upsertRepository: vi.fn(),
           insertSnapshotItem: vi.fn(),
@@ -381,7 +384,7 @@ describe("ingestTrendingSnapshot", () => {
     ).rejects.toThrow("Trending snapshot produced no persisted items");
 
     expect(markSnapshotSuccess).not.toHaveBeenCalled();
-    expect(markSnapshotFailed).toHaveBeenCalledWith("snapshot-skipped");
+    expect(markSnapshotFailed).toHaveBeenCalledWith("snapshot-skipped", "lease-skipped");
   });
 
   it("downgrades thrown README fetch errors to null and continues persisting the item", async () => {
@@ -402,6 +405,7 @@ describe("ingestTrendingSnapshot", () => {
         prepareSnapshotRun: vi.fn().mockResolvedValue({
           kind: "ready",
           snapshotId: "snapshot-readme-fallback",
+          leaseToken: "lease-readme",
         }),
         upsertRepository: vi.fn().mockResolvedValue({ id: "repo-1" }),
         insertSnapshotItem,
@@ -436,7 +440,11 @@ describe("ingestTrendingSnapshot", () => {
       readmeExcerpt: null,
       summaryKo: "README 없이도 요약",
     });
-    expect(markSnapshotSuccess).toHaveBeenCalledWith("snapshot-readme-fallback", 1);
+    expect(markSnapshotSuccess).toHaveBeenCalledWith(
+      "snapshot-readme-fallback",
+      1,
+      "lease-readme",
+    );
     expect(markSnapshotFailed).not.toHaveBeenCalled();
   });
 
@@ -478,8 +486,12 @@ describe("ingestTrendingSnapshot", () => {
         prepareSnapshotRun: vi.fn().mockResolvedValue({
           kind: "ready",
           snapshotId: "snapshot-heartbeat",
+          leaseToken: "lease-0",
         }),
-        heartbeatSnapshot,
+        heartbeatSnapshot: heartbeatSnapshot
+          .mockResolvedValueOnce("lease-1")
+          .mockResolvedValueOnce("lease-2")
+          .mockResolvedValueOnce("lease-3"),
         upsertRepository: vi
           .fn()
           .mockResolvedValueOnce({ id: "repo-1" })
@@ -494,16 +506,19 @@ describe("ingestTrendingSnapshot", () => {
     expect(heartbeatSnapshot).toHaveBeenNthCalledWith(
       1,
       "snapshot-heartbeat",
+      "lease-0",
       new Date("2026-03-29T00:05:00.000Z"),
     );
     expect(heartbeatSnapshot).toHaveBeenNthCalledWith(
       2,
       "snapshot-heartbeat",
+      "lease-1",
       new Date("2026-03-29T00:10:00.000Z"),
     );
     expect(heartbeatSnapshot).toHaveBeenNthCalledWith(
       3,
       "snapshot-heartbeat",
+      "lease-2",
       new Date("2026-03-29T00:15:00.000Z"),
     );
   });
@@ -575,7 +590,10 @@ describe("createSupabaseSnapshotStore", () => {
             data: {
               id: "snapshot-running",
               status: "running",
-              captured_at: "2026-03-29T00:00:00.000Z",
+              captured_at:
+                typeof payload.captured_at === "string"
+                  ? payload.captured_at
+                  : "2026-03-29T00:00:00.000Z",
             },
             error: null,
           };
@@ -598,12 +616,105 @@ describe("createSupabaseSnapshotStore", () => {
     expect(result).toEqual({
       kind: "ready",
       snapshotId: "snapshot-running",
+      leaseToken: "2026-03-29T00:30:00.000Z",
     });
     expect(events).toEqual([
       'select:trending_snapshots:[["snapshot_date","2026-03-29"]]',
       'update:trending_snapshots:{"status":"running","item_count":0,"captured_at":"2026-03-29T00:30:00.000Z"}:[["id","snapshot-running"],["status","running"],["captured_at","2026-03-29T00:00:00.000Z"]]',
       'delete:trending_snapshot_items:[["snapshot_id","snapshot-running"]]',
     ]);
+  });
+
+  it("rejects stale heartbeats and finishes after another worker reclaims the lease", async () => {
+    let snapshot = {
+      id: "snapshot-running",
+      status: "running",
+      captured_at: "2026-03-29T00:00:00.000Z",
+    };
+    let deleteCount = 0;
+    const store = createSupabaseSnapshotStore(
+      createSupabaseClientDouble({
+        selectMaybeSingle: async ({ filters }) => {
+          const matches = filters.every(([field, value]) => {
+            const key = field as "id" | "snapshot_date";
+
+            if (key === "snapshot_date") {
+              return value === "2026-03-29";
+            }
+
+            return snapshot.id === value;
+          });
+
+          return {
+            data: matches ? { ...snapshot } : null,
+            error: null,
+          };
+        },
+        updateMaybeSingle: async ({ payload, filters }) => {
+          const matches = filters.every(([field, value]) => {
+            if (field === "id") {
+              return snapshot.id === value;
+            }
+
+            if (field === "status") {
+              return snapshot.status === value;
+            }
+
+            if (field === "captured_at") {
+              return snapshot.captured_at === value;
+            }
+
+            return false;
+          });
+
+          if (!matches) {
+            return {
+              data: null,
+              error: null,
+            };
+          }
+
+          snapshot = {
+            ...snapshot,
+            ...payload,
+          } as typeof snapshot;
+
+          return {
+            data: { ...snapshot },
+            error: null,
+          };
+        },
+        deleteEq: async () => {
+          deleteCount += 1;
+
+          return {
+            error: null,
+          };
+        },
+      }),
+    );
+
+    const reclaimed = await store.prepareSnapshotRun({
+      snapshotDate: "2026-03-29",
+      capturedAt: new Date("2026-03-29T00:30:00.000Z"),
+    });
+
+    expect(reclaimed).toEqual({
+      kind: "ready",
+      snapshotId: "snapshot-running",
+      leaseToken: "2026-03-29T00:30:00.000Z",
+    });
+    await expect(
+      store.heartbeatSnapshot?.(
+        "snapshot-running",
+        "2026-03-29T00:00:00.000Z",
+        new Date("2026-03-29T00:35:00.000Z"),
+      ),
+    ).rejects.toThrow("Snapshot lease lost for snapshot-running");
+    await expect(
+      store.markSnapshotSuccess("snapshot-running", 1, "2026-03-29T00:00:00.000Z"),
+    ).rejects.toThrow("Snapshot lease lost for snapshot-running");
+    expect(deleteCount).toBe(1);
   });
 
   it("reuses a failed snapshot by resetting it to running and clearing prior items", async () => {
@@ -649,6 +760,7 @@ describe("createSupabaseSnapshotStore", () => {
     expect(result).toEqual({
       kind: "ready",
       snapshotId: "snapshot-failed",
+      leaseToken: "2026-03-29T00:00:00.000Z",
     });
     expect(events).toEqual([
       'select:trending_snapshots:[["snapshot_date","2026-03-29"]]',
