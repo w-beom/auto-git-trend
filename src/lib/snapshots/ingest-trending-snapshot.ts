@@ -51,6 +51,7 @@ export interface IngestTrendingSnapshotStore {
     snapshotDate: string;
     capturedAt: Date;
   }): Promise<PrepareSnapshotRunResult>;
+  heartbeatSnapshot?: (snapshotId: string, capturedAt: Date) => Promise<void>;
   upsertRepository(payload: RepositoryUpsertPayload): Promise<StoredRepositoryReference>;
   insertSnapshotItem(payload: SnapshotItemInsertPayload): Promise<void>;
   markSnapshotSuccess(snapshotId: string, itemCount: number): Promise<void>;
@@ -71,7 +72,7 @@ export interface IngestTrendingSnapshotDependencies {
     readme: string | null;
   }) => Promise<string>;
   store: IngestTrendingSnapshotStore;
-  now?: Date;
+  now?: Date | (() => Date);
 }
 
 export interface IngestTrendingSnapshotResultItem {
@@ -85,6 +86,14 @@ export interface IngestTrendingSnapshotResult {
   status: "created" | "skipped";
   itemCount: number;
   items: IngestTrendingSnapshotResultItem[];
+}
+
+function resolveNow(now: IngestTrendingSnapshotDependencies["now"]): Date {
+  if (typeof now === "function") {
+    return now();
+  }
+
+  return now ?? new Date();
 }
 
 function isUniqueSnapshotDateViolation(error: { code?: string } | null): boolean {
@@ -398,6 +407,25 @@ export function createSupabaseSnapshotStore(
 
       return data;
     },
+    async heartbeatSnapshot(snapshotId, capturedAt) {
+      const { data, error } = await client
+        .from("trending_snapshots")
+        .update({
+          captured_at: capturedAt.toISOString(),
+        })
+        .eq("id", snapshotId)
+        .eq("status", "running")
+        .select("id, status, captured_at")
+        .maybeSingle<SnapshotState>();
+
+      if (error) {
+        throw new Error(`Failed to heartbeat snapshot ${snapshotId}: ${error.message}`);
+      }
+
+      if (!data) {
+        throw new Error(`Snapshot ${snapshotId} is no longer running for heartbeat`);
+      }
+    },
     async insertSnapshotItem(payload) {
       const { error } = await client.from("trending_snapshot_items").insert({
         snapshot_id: payload.snapshotId,
@@ -448,7 +476,7 @@ export async function ingestTrendingSnapshot(
 ): Promise<IngestTrendingSnapshotResult> {
   const snapshotRun = await dependencies.store.prepareSnapshotRun({
     snapshotDate: dependencies.targetDate,
-    capturedAt: dependencies.now ?? new Date(),
+    capturedAt: resolveNow(dependencies.now),
   });
 
   if (snapshotRun.kind === "skipped") {
@@ -461,6 +489,11 @@ export async function ingestTrendingSnapshot(
   }
 
   try {
+    await dependencies.store.heartbeatSnapshot?.(
+      snapshotRun.snapshotId,
+      resolveNow(dependencies.now),
+    );
+
     const seeds = await dependencies.fetchTrendingSeeds();
     const items: IngestTrendingSnapshotResultItem[] = [];
 
@@ -495,6 +528,11 @@ export async function ingestTrendingSnapshot(
           readme,
           summaryKo,
         }),
+      );
+
+      await dependencies.store.heartbeatSnapshot?.(
+        snapshotRun.snapshotId,
+        resolveNow(dependencies.now),
       );
 
       items.push({

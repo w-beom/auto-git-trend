@@ -439,6 +439,74 @@ describe("ingestTrendingSnapshot", () => {
     expect(markSnapshotSuccess).toHaveBeenCalledWith("snapshot-readme-fallback", 1);
     expect(markSnapshotFailed).not.toHaveBeenCalled();
   });
+
+  it("refreshes the running snapshot lease after claiming and after persisted progress", async () => {
+    const heartbeatSnapshot = vi.fn().mockResolvedValue(undefined);
+    const timestamps = [
+      new Date("2026-03-29T00:00:00.000Z"),
+      new Date("2026-03-29T00:05:00.000Z"),
+      new Date("2026-03-29T00:10:00.000Z"),
+      new Date("2026-03-29T00:15:00.000Z"),
+    ];
+    let nowIndex = 0;
+
+    const result = await ingestTrendingSnapshot({
+      targetDate: "2026-03-29",
+      now: () => timestamps[nowIndex++] ?? timestamps[timestamps.length - 1],
+      fetchTrendingSeeds: async () => [
+        buildSeed(),
+        buildSeed({
+          rank: 2,
+          owner: "beta",
+          name: "orbit",
+          fullName: "beta/orbit",
+          repositoryPath: "beta/orbit",
+          starsToday: 95,
+        }),
+      ],
+      fetchRepository: async (owner, name) =>
+        owner === "beta" && name === "orbit"
+          ? buildRepository({
+              githubRepoId: 202,
+              description: "Orbit control center.",
+              githubUrl: "https://github.com/beta/orbit",
+            })
+          : buildRepository(),
+      fetchReadme: async () => "# README",
+      summarize: async ({ fullName }) => `요약:${fullName}`,
+      store: {
+        prepareSnapshotRun: vi.fn().mockResolvedValue({
+          kind: "ready",
+          snapshotId: "snapshot-heartbeat",
+        }),
+        heartbeatSnapshot,
+        upsertRepository: vi
+          .fn()
+          .mockResolvedValueOnce({ id: "repo-1" })
+          .mockResolvedValueOnce({ id: "repo-2" }),
+        insertSnapshotItem: vi.fn().mockResolvedValue(undefined),
+        markSnapshotSuccess: vi.fn().mockResolvedValue(undefined),
+        markSnapshotFailed: vi.fn().mockResolvedValue(undefined),
+      },
+    });
+
+    expect(result.itemCount).toBe(2);
+    expect(heartbeatSnapshot).toHaveBeenNthCalledWith(
+      1,
+      "snapshot-heartbeat",
+      new Date("2026-03-29T00:05:00.000Z"),
+    );
+    expect(heartbeatSnapshot).toHaveBeenNthCalledWith(
+      2,
+      "snapshot-heartbeat",
+      new Date("2026-03-29T00:10:00.000Z"),
+    );
+    expect(heartbeatSnapshot).toHaveBeenNthCalledWith(
+      3,
+      "snapshot-heartbeat",
+      new Date("2026-03-29T00:15:00.000Z"),
+    );
+  });
 });
 
 describe("createSupabaseSnapshotStore", () => {
