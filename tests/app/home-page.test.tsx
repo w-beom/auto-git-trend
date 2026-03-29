@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const { getLatestSnapshotPageData } = vi.hoisted(() => ({
@@ -74,22 +74,24 @@ describe("HomePage", () => {
   it("renders the latest snapshot summary data", async () => {
     getLatestSnapshotPageData.mockResolvedValue(buildSnapshot());
 
-    render(await HomePage());
+    await act(async () => {
+      render(<HomePage />);
+    });
 
     expect(getLatestSnapshotPageData).toHaveBeenCalled();
     expect(
-      screen.getByRole("heading", {
+      await screen.findByRole("heading", {
         name: "Trending snapshot for 2026-03-29",
       }),
     ).toBeInTheDocument();
     expect(
-      screen.getByText("Captured Mar 29, 2026, 12:15 AM UTC"),
+      await screen.findByText("Captured Mar 29, 2026, 12:15 AM UTC"),
     ).toBeInTheDocument();
-    expect(screen.getByText("2 repositories captured")).toBeInTheDocument();
-    expect(screen.getByText("acme/rocket")).toBeInTheDocument();
-    expect(screen.getByText("beta/orbit")).toBeInTheDocument();
+    expect(await screen.findByText("2 repositories captured")).toBeInTheDocument();
+    expect(await screen.findByText("acme/rocket")).toBeInTheDocument();
+    expect(await screen.findByText("beta/orbit")).toBeInTheDocument();
     expect(
-      screen.getByText("빠르게 배포할 수 있는 로켓 플랫폼입니다."),
+      await screen.findByText("빠르게 배포할 수 있는 로켓 플랫폼입니다."),
     ).toBeInTheDocument();
     expect(
       screen.queryByText("Trending snapshots will render here later."),
@@ -99,13 +101,22 @@ describe("HomePage", () => {
   it("renders a safe empty state when no latest snapshot exists", async () => {
     getLatestSnapshotPageData.mockResolvedValue(null);
 
-    render(await HomePage());
+    await act(async () => {
+      render(<HomePage />);
+    });
 
     expect(
-      screen.getByText("The latest GitHub Trending snapshot is not available yet."),
+      await screen.findByRole("heading", {
+        name: "Trending snapshots will render here later.",
+      }),
     ).toBeInTheDocument();
     expect(
-      screen.queryByText("Trending snapshots will render here later."),
-    ).not.toBeInTheDocument();
+      await screen.findByText(
+        "The base app is ready for the daily GitHub Trending pipeline and future archive views.",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      await screen.findByText("The latest GitHub Trending snapshot is not available yet."),
+    ).toBeInTheDocument();
   });
 });
