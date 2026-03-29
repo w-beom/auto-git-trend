@@ -111,17 +111,6 @@ export function createSupabaseSnapshotStore(
     snapshotId: string;
     capturedAt: Date;
   }): Promise<PrepareSnapshotRunResult> {
-    const { error: deleteError } = await client
-      .from("trending_snapshot_items")
-      .delete()
-      .eq("snapshot_id", input.snapshotId);
-
-    if (deleteError) {
-      throw new Error(
-        `Failed to clear snapshot items for ${input.snapshotId}: ${deleteError.message}`,
-      );
-    }
-
     const { data, error } = await client
       .from("trending_snapshots")
       .update({
@@ -164,6 +153,33 @@ export function createSupabaseSnapshotStore(
         snapshotId: currentSnapshot.data.id,
         reason: currentSnapshot.data.status,
       };
+    }
+
+    const { error: deleteError } = await client
+      .from("trending_snapshot_items")
+      .delete()
+      .eq("snapshot_id", input.snapshotId);
+
+    if (deleteError) {
+      const revertResult = await client
+        .from("trending_snapshots")
+        .update({
+          status: "failed",
+        })
+        .eq("id", input.snapshotId)
+        .eq("status", "running")
+        .select("id, status")
+        .maybeSingle<SnapshotState>();
+
+      if (revertResult.error) {
+        throw new Error(
+          `Failed to clear snapshot items for ${input.snapshotId}: ${deleteError.message}; failed to revert snapshot: ${revertResult.error.message}`,
+        );
+      }
+
+      throw new Error(
+        `Failed to clear snapshot items for ${input.snapshotId}: ${deleteError.message}`,
+      );
     }
 
     return {

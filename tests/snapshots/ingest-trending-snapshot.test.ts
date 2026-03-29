@@ -376,12 +376,12 @@ describe("createSupabaseSnapshotStore", () => {
     });
     expect(events).toEqual([
       'select:trending_snapshots:[["snapshot_date","2026-03-29"]]',
-      'delete:trending_snapshot_items:[["snapshot_id","snapshot-failed"]]',
       'update:trending_snapshots:{"status":"running","item_count":0,"captured_at":"2026-03-29T00:00:00.000Z"}:[["id","snapshot-failed"],["status","failed"]]',
+      'delete:trending_snapshot_items:[["snapshot_id","snapshot-failed"]]',
     ]);
   });
 
-  it("leaves a failed snapshot failed when cleanup errors during retry preparation", async () => {
+  it("reverts a claimed failed snapshot back to failed when cleanup errors during retry preparation", async () => {
     const events: string[] = [];
     const store = createSupabaseSnapshotStore(
       createSupabaseClientDouble({
@@ -427,7 +427,71 @@ describe("createSupabaseSnapshotStore", () => {
 
     expect(events).toEqual([
       'select:trending_snapshots:[["snapshot_date","2026-03-29"]]',
+      'update:trending_snapshots:{"status":"running","item_count":0,"captured_at":"2026-03-29T00:00:00.000Z"}:[["id","snapshot-failed"],["status","failed"]]',
       'delete:trending_snapshot_items:[["snapshot_id","snapshot-failed"]]',
+      'update:trending_snapshots:{"status":"failed"}:[["id","snapshot-failed"],["status","running"]]',
+    ]);
+  });
+
+  it("skips safely when a concurrent retry loses the failed-to-running claim", async () => {
+    const events: string[] = [];
+    let selectCount = 0;
+    const store = createSupabaseSnapshotStore(
+      createSupabaseClientDouble({
+        selectMaybeSingle: async ({ table, filters }) => {
+          events.push(`select:${table}:${JSON.stringify(filters)}`);
+          selectCount += 1;
+
+          if (selectCount === 1) {
+            return {
+              data: {
+                id: "snapshot-failed",
+                status: "failed",
+              },
+              error: null,
+            };
+          }
+
+          return {
+            data: {
+              id: "snapshot-failed",
+              status: "running",
+            },
+            error: null,
+          };
+        },
+        updateMaybeSingle: async ({ table, payload, filters }) => {
+          events.push(`update:${table}:${JSON.stringify(payload)}:${JSON.stringify(filters)}`);
+
+          return {
+            data: null,
+            error: null,
+          };
+        },
+        deleteEq: async ({ table, filters }) => {
+          events.push(`delete:${table}:${JSON.stringify(filters)}`);
+
+          return {
+            error: null,
+          };
+        },
+      }),
+    );
+
+    const result = await store.prepareSnapshotRun({
+      snapshotDate: "2026-03-29",
+      capturedAt: new Date("2026-03-29T00:00:00.000Z"),
+    });
+
+    expect(result).toEqual({
+      kind: "skipped",
+      reason: "running",
+      snapshotId: "snapshot-failed",
+    });
+    expect(events).toEqual([
+      'select:trending_snapshots:[["snapshot_date","2026-03-29"]]',
+      'update:trending_snapshots:{"status":"running","item_count":0,"captured_at":"2026-03-29T00:00:00.000Z"}:[["id","snapshot-failed"],["status","failed"]]',
+      'select:trending_snapshots:[["id","snapshot-failed"]]',
     ]);
   });
 
