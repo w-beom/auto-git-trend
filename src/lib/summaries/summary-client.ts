@@ -1,7 +1,5 @@
 import OpenAI from "openai";
 
-import { loadServerEnv } from "@/lib/env";
-
 export interface SummaryClient {
   summarize(prompt: string): Promise<string>;
 }
@@ -11,12 +9,22 @@ export interface OpenAISummaryClientOptions {
   processEnv?: NodeJS.ProcessEnv;
 }
 
+function loadOpenAIKey(processEnv: NodeJS.ProcessEnv = process.env): string {
+  const apiKey = processEnv.OPENAI_API_KEY;
+
+  if (!apiKey || !apiKey.trim()) {
+    throw new Error("Invalid summary environment: OPENAI_API_KEY is required");
+  }
+
+  return apiKey;
+}
+
 export function createOpenAISummaryClient(
   options: OpenAISummaryClientOptions = {},
 ): SummaryClient {
-  const env = loadServerEnv(options.processEnv);
+  const apiKey = loadOpenAIKey(options.processEnv);
   const client = new OpenAI({
-    apiKey: env.OPENAI_API_KEY,
+    apiKey,
   });
   const model = options.model ?? "gpt-5-mini";
 
@@ -27,7 +35,7 @@ export function createOpenAISummaryClient(
         input: prompt,
       });
 
-      return response.output_text;
+      return response.output_text.trim();
     },
   };
 }
