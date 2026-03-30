@@ -6,7 +6,9 @@ import { fetchRepository } from "@/lib/github/fetch-repository";
 import { fetchTrendingHtml } from "@/lib/github/fetch-trending-html";
 import { parseTrendingRepositories } from "@/lib/github/parse-trending";
 import {
+  serializeReadmeExcerpt,
   serializeRepositoryForUpsert,
+  serializeRepositoryDescriptionSnapshot,
   serializeSnapshotItemForInsert,
   type RepositoryUpsertPayload,
   type SnapshotItemInsertPayload,
@@ -35,6 +37,18 @@ interface StoredRepositoryReference {
   id: string;
 }
 
+export interface LatestSuccessfulSnapshotItem {
+  summaryKo: string;
+  repoDescriptionSnapshot: string | null;
+  readmeExcerpt: string | null;
+}
+
+interface LatestSuccessfulSnapshotItemRow {
+  summary_ko: string;
+  repo_description_snapshot: string | null;
+  readme_excerpt: string | null;
+}
+
 export type PrepareSnapshotRunResult =
   | {
       kind: "ready";
@@ -58,6 +72,9 @@ export interface IngestTrendingSnapshotStore {
     capturedAt: Date,
   ) => Promise<string>;
   upsertRepository(payload: RepositoryUpsertPayload): Promise<StoredRepositoryReference>;
+  getLatestSuccessfulSnapshotItem?: (
+    repositoryId: string,
+  ) => Promise<LatestSuccessfulSnapshotItem | null>;
   insertSnapshotItem(
     payload: SnapshotItemInsertPayload,
     leaseToken: string,
@@ -431,6 +448,43 @@ export function createSupabaseSnapshotStore(
 
       return data;
     },
+    async getLatestSuccessfulSnapshotItem(repositoryId) {
+      const { data, error } = await client
+        .from("trending_snapshot_items")
+        .select(
+          `
+            summary_ko,
+            repo_description_snapshot,
+            readme_excerpt,
+            trending_snapshots!inner (
+              status
+            )
+          `,
+        )
+        .eq("repository_id", repositoryId)
+        .eq("trending_snapshots.status", "success")
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle<LatestSuccessfulSnapshotItemRow>();
+
+      if (error) {
+        throw new Error(
+          `Failed to load latest successful snapshot item for repository ${repositoryId}: ${error.message}`,
+        );
+      }
+
+      if (!data) {
+        return null;
+      }
+
+      return {
+        summaryKo: data.summary_ko.trim(),
+        repoDescriptionSnapshot: serializeRepositoryDescriptionSnapshot(
+          data.repo_description_snapshot,
+        ),
+        readmeExcerpt: data.readme_excerpt?.trim() || null,
+      };
+    },
     async heartbeatSnapshot(snapshotId, leaseToken, capturedAt) {
       const { data, error } = await client
         .from("trending_snapshots")
@@ -599,20 +653,35 @@ export async function ingestTrendingSnapshot(
         continue;
       }
 
+      const storedRepository = await dependencies.store.upsertRepository(
+        serializeRepositoryForUpsert(seed, repository),
+      );
+      const latestSuccessfulSnapshotItem =
+        (await dependencies.store.getLatestSuccessfulSnapshotItem?.(
+          storedRepository.id,
+        )) ?? null;
+
       let readme: string | null;
       try {
         readme = await dependencies.fetchReadme(seed.owner, seed.name);
       } catch {
         readme = null;
       }
-      const summaryKo = await dependencies.summarize({
-        fullName: seed.fullName,
-        description: repository.description,
-        readme,
-      });
-      const storedRepository = await dependencies.store.upsertRepository(
-        serializeRepositoryForUpsert(seed, repository),
+      const repoDescriptionSnapshot = serializeRepositoryDescriptionSnapshot(
+        repository.description,
       );
+      const readmeExcerpt = serializeReadmeExcerpt(readme);
+      const shouldReuseStoredSummary =
+        latestSuccessfulSnapshotItem !== null &&
+        latestSuccessfulSnapshotItem.repoDescriptionSnapshot === repoDescriptionSnapshot &&
+        latestSuccessfulSnapshotItem.readmeExcerpt === readmeExcerpt;
+      const summaryKo = shouldReuseStoredSummary
+        ? latestSuccessfulSnapshotItem.summaryKo
+        : await dependencies.summarize({
+            fullName: seed.fullName,
+            description: repository.description,
+            readme,
+          });
 
       currentLeaseToken = await dependencies.store.insertSnapshotItem(
         serializeSnapshotItemForInsert({

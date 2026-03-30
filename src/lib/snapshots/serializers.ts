@@ -35,6 +35,12 @@ function normalizeNullableText(value: string | null | undefined): string | null 
   return trimmed ? trimmed : null;
 }
 
+export function serializeRepositoryDescriptionSnapshot(
+  description: string | null,
+): string | null {
+  return normalizeNullableText(description);
+}
+
 export function serializeRepositoryForUpsert(
   seed: TrendingRepositorySeed,
   repository: RepositoryMetadata,
@@ -76,7 +82,9 @@ export function serializeSnapshotItemForInsert(input: {
     repositoryId: input.repositoryId,
     rank: input.seed.rank,
     starsToday: input.seed.starsToday,
-    repoDescriptionSnapshot: normalizeNullableText(input.repository.description),
+    repoDescriptionSnapshot: serializeRepositoryDescriptionSnapshot(
+      input.repository.description,
+    ),
     readmeExcerpt: serializeReadmeExcerpt(input.readme),
     summaryKo: input.summaryKo.trim(),
   };

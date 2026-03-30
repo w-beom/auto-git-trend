@@ -479,6 +479,140 @@ describe("ingestTrendingSnapshot", () => {
     expect(markSnapshotFailed).not.toHaveBeenCalled();
   });
 
+  it("reuses the stored summary when both description and README excerpt are unchanged", async () => {
+    const summarize = vi.fn().mockResolvedValue("새 요약이면 안 됨");
+    const getLatestSuccessfulSnapshotItem = vi.fn().mockResolvedValue({
+      summaryKo: "기존 요약",
+      repoDescriptionSnapshot: "A fast launch platform.",
+      readmeExcerpt: "Rocket\nLaunch docs",
+    });
+    const insertSnapshotItem = vi.fn().mockResolvedValue("lease-reuse-2");
+    const store = {
+      prepareSnapshotRun: vi.fn().mockResolvedValue({
+        kind: "ready",
+        snapshotId: "snapshot-reuse",
+        leaseToken: "lease-reuse",
+      }),
+      upsertRepository: vi.fn().mockResolvedValue({ id: "repo-1" }),
+      getLatestSuccessfulSnapshotItem,
+      insertSnapshotItem,
+      markSnapshotSuccess: vi.fn().mockResolvedValue(undefined),
+      markSnapshotFailed: vi.fn().mockResolvedValue(undefined),
+    };
+
+    const result = await ingestTrendingSnapshot({
+      targetDate: "2026-03-29",
+      fetchTrendingSeeds: async () => [buildSeed()],
+      fetchRepository: async () => buildRepository(),
+      fetchReadme: async () => "# Rocket\nLaunch docs",
+      summarize,
+      store,
+    });
+
+    expect(result).toEqual({
+      snapshotId: "snapshot-reuse",
+      status: "created",
+      itemCount: 1,
+      items: [
+        {
+          rank: 1,
+          repositoryId: "repo-1",
+          summaryKo: "기존 요약",
+        },
+      ],
+    });
+    expect(getLatestSuccessfulSnapshotItem).toHaveBeenCalledWith("repo-1");
+    expect(summarize).not.toHaveBeenCalled();
+    expect(insertSnapshotItem).toHaveBeenCalledWith(
+      {
+        snapshotId: "snapshot-reuse",
+        repositoryId: "repo-1",
+        rank: 1,
+        starsToday: 120,
+        repoDescriptionSnapshot: "A fast launch platform.",
+        readmeExcerpt: "Rocket\nLaunch docs",
+        summaryKo: "기존 요약",
+      },
+      "lease-reuse",
+      expect.any(Date),
+    );
+  });
+
+  it("re-summarizes when the README excerpt changes", async () => {
+    const summarize = vi.fn().mockResolvedValue("README 갱신 요약");
+    const getLatestSuccessfulSnapshotItem = vi.fn().mockResolvedValue({
+      summaryKo: "기존 요약",
+      repoDescriptionSnapshot: "A fast launch platform.",
+      readmeExcerpt: "Old readme excerpt",
+    });
+
+    await ingestTrendingSnapshot({
+      targetDate: "2026-03-29",
+      fetchTrendingSeeds: async () => [buildSeed()],
+      fetchRepository: async () => buildRepository(),
+      fetchReadme: async () => "# Rocket\nLaunch docs",
+      summarize,
+      store: {
+        prepareSnapshotRun: vi.fn().mockResolvedValue({
+          kind: "ready",
+          snapshotId: "snapshot-readme-changed",
+          leaseToken: "lease-readme-changed",
+        }),
+        upsertRepository: vi.fn().mockResolvedValue({ id: "repo-1" }),
+        getLatestSuccessfulSnapshotItem,
+        insertSnapshotItem: vi.fn().mockResolvedValue("lease-readme-changed-2"),
+        markSnapshotSuccess: vi.fn().mockResolvedValue(undefined),
+        markSnapshotFailed: vi.fn().mockResolvedValue(undefined),
+      },
+    });
+
+    expect(getLatestSuccessfulSnapshotItem).toHaveBeenCalledWith("repo-1");
+    expect(summarize).toHaveBeenCalledWith({
+      fullName: "acme/rocket",
+      description: "A fast launch platform.",
+      readme: "# Rocket\nLaunch docs",
+    });
+  });
+
+  it("re-summarizes when the repository description changes", async () => {
+    const summarize = vi.fn().mockResolvedValue("설명 갱신 요약");
+    const getLatestSuccessfulSnapshotItem = vi.fn().mockResolvedValue({
+      summaryKo: "기존 요약",
+      repoDescriptionSnapshot: "A slower launch platform.",
+      readmeExcerpt: "Rocket\nLaunch docs",
+    });
+
+    await ingestTrendingSnapshot({
+      targetDate: "2026-03-29",
+      fetchTrendingSeeds: async () => [buildSeed()],
+      fetchRepository: async () =>
+        buildRepository({
+          description: "A fast launch platform.",
+        }),
+      fetchReadme: async () => "# Rocket\nLaunch docs",
+      summarize,
+      store: {
+        prepareSnapshotRun: vi.fn().mockResolvedValue({
+          kind: "ready",
+          snapshotId: "snapshot-description-changed",
+          leaseToken: "lease-description-changed",
+        }),
+        upsertRepository: vi.fn().mockResolvedValue({ id: "repo-1" }),
+        getLatestSuccessfulSnapshotItem,
+        insertSnapshotItem: vi.fn().mockResolvedValue("lease-description-changed-2"),
+        markSnapshotSuccess: vi.fn().mockResolvedValue(undefined),
+        markSnapshotFailed: vi.fn().mockResolvedValue(undefined),
+      },
+    });
+
+    expect(getLatestSuccessfulSnapshotItem).toHaveBeenCalledWith("repo-1");
+    expect(summarize).toHaveBeenCalledWith({
+      fullName: "acme/rocket",
+      description: "A fast launch platform.",
+      readme: "# Rocket\nLaunch docs",
+    });
+  });
+
   it("refreshes the running snapshot lease after claiming and during persisted progress", async () => {
     const heartbeatSnapshot = vi.fn().mockResolvedValue("lease-1");
     const insertSnapshotItem = vi
