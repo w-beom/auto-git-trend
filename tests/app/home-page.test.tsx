@@ -126,7 +126,10 @@ describe("HomePage", () => {
     expect(screen.queryByText("TypeScript")).not.toBeInTheDocument();
     expect(screen.queryByText("+120 today")).not.toBeInTheDocument();
     expect(screen.getAllByText("4,200 stars")).toHaveLength(2);
-    expect(screen.getByText("210 forks")).toBeInTheDocument();
+    expect(screen.getAllByText("210 forks")).toHaveLength(2);
+    expect(
+      screen.getByRole("button", { name: "TOP 1 카드 보기" }),
+    ).toHaveAttribute("aria-current", "true");
     expect(
       screen.getByRole("link", {
         name: "acme/rocket GitHub에서 보기",

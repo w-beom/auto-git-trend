@@ -216,6 +216,15 @@ Implementation planning will assume a server-side LLM provider is used for summa
 2. Highlighted Top 3 section
 3. Full ranked list
 
+### Responsive Reading Behavior
+
+- The overall responsive direction uses a balanced reading-first layout rather than a dense poster layout on small screens.
+- The hero and full ranking sections should prioritize comfortable Korean reading with cleaner spacing, reduced line crowding, and vertically stacked metadata when needed.
+- The Highlighted Top 3 section should become a single-card horizontal viewer that uses the same card scale and content density as the full ranking cards.
+- On desktop-width layouts, the Top 3 viewer should expose explicit previous and next buttons so mouse users can move through Top 1, Top 2, and Top 3 without relying on drag gestures.
+- On mobile-width layouts, the Top 3 viewer should stay swipe-first with horizontal touch scrolling and dot-based paging feedback.
+- The full ranking list should remain a vertical list on every viewport so longer summaries stay easy to scan and read.
+
 ### Card Content Priority
 
 Each repository card should emphasize:
@@ -249,6 +258,7 @@ Visual intent:
 - Metadata should support scanning, not compete with the summary.
 - Users should understand a repository without leaving the page.
 - Historical snapshots should feel like archived issues of a daily digest.
+- Featured Top 3 cards may feel more playful and interactive, but they should keep the same reading comfort as the main ranking cards.
 
 ## Testing Strategy
 
