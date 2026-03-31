@@ -1,3 +1,7 @@
+"use client";
+
+import { useState } from "react";
+
 import type { SnapshotPageItem } from "@/lib/snapshots/queries";
 
 interface RepositoryCardProps {
@@ -26,22 +30,40 @@ export function RepositoryCard({
 }: RepositoryCardProps) {
   const isFeature = variant === "feature";
   const summaryParagraphs = getSummaryParagraphs(item.summaryKo);
+  const isToggleable = !isFeature && summaryParagraphs.length > 1;
+  const [isExpanded, setIsExpanded] = useState(false);
+  const visibleParagraphs =
+    isToggleable && !isExpanded ? summaryParagraphs.slice(0, 1) : summaryParagraphs;
 
   return (
     <article className={`repo-card repo-card--${variant}`}>
       <div className="repo-card__content">
         <div className="repo-card__masthead">
-          <span className={`rank-badge rank-badge--${variant}`}>
-            {isFeature ? `TOP ${item.rank}` : `${item.rank}위`}
-          </span>
-          <span className="repo-card__owner">{`@${item.owner}`}</span>
+          <div className="repo-card__masthead-main">
+            <span className={`rank-badge rank-badge--${variant}`}>
+              {isFeature ? `TOP ${item.rank}` : `${item.rank}위`}
+            </span>
+            <span className="repo-card__owner">{`@${item.owner}`}</span>
+          </div>
+
+          {isToggleable ? (
+            <button
+              type="button"
+              className={`repo-card__toggle${isExpanded ? " repo-card__toggle--expanded" : ""}`}
+              aria-label={isExpanded ? "상세 접기" : "상세 펼치기"}
+              aria-expanded={isExpanded}
+              onClick={() => setIsExpanded((expanded) => !expanded)}
+            >
+              <span aria-hidden="true">{isExpanded ? "▴" : "▾"}</span>
+            </button>
+          ) : null}
         </div>
 
         <div className="repo-card__body">
           <p className="repo-card__fullname">{item.fullName}</p>
           <h3 className="repo-card__name">{item.name}</h3>
           <div className="repo-card__summary-block" role="group" aria-label="프로젝트 요약">
-            {summaryParagraphs.map((paragraph) => (
+            {visibleParagraphs.map((paragraph) => (
               <p key={paragraph} className="repo-card__summary-paragraph">
                 {paragraph}
               </p>

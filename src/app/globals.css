@@ -560,10 +560,18 @@ a {
 
 .repo-card__masthead {
   display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.repo-card__masthead-main {
+  display: flex;
   justify-content: flex-start;
   align-items: center;
   flex-wrap: wrap;
   gap: 10px;
+  min-width: 0;
 }
 
 .rank-badge {
@@ -593,6 +601,26 @@ a {
   letter-spacing: 0.05em;
   text-transform: uppercase;
   color: var(--ink-muted);
+}
+
+.repo-card__toggle {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  min-height: 44px;
+  border: var(--border-md);
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: 2px 2px 0 rgba(17, 17, 17, 0.64);
+  font: inherit;
+  font-size: 1rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.repo-card__toggle--expanded {
+  background: var(--orange);
 }
 
 .repo-card__content {
