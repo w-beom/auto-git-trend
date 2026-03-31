@@ -1,21 +1,30 @@
 import { render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { getSnapshotPageDataByDate, notFound } = vi.hoisted(() => ({
+const { getSnapshotPageDataByDate, getSnapshotArchiveDates, notFound } = vi.hoisted(() => ({
   getSnapshotPageDataByDate: vi.fn(),
+  getSnapshotArchiveDates: vi.fn(),
   notFound: vi.fn(() => {
     throw new Error("NEXT_NOT_FOUND");
   }),
+}));
+
+const { push } = vi.hoisted(() => ({
+  push: vi.fn(),
 }));
 
 import ArchivePage from "@/app/archive/[date]/page";
 
 vi.mock("@/lib/snapshots/queries", () => ({
   getSnapshotPageDataByDate,
+  getSnapshotArchiveDates,
 }));
 
 vi.mock("next/navigation", () => ({
   notFound,
+  useRouter: () => ({
+    push,
+  }),
 }));
 
 function buildSnapshot() {
@@ -54,11 +63,18 @@ function buildSnapshot() {
 describe("ArchivePage", () => {
   beforeEach(() => {
     getSnapshotPageDataByDate.mockReset();
+    getSnapshotArchiveDates.mockReset();
     notFound.mockClear();
+    push.mockReset();
   });
 
-  it("renders the requested snapshot date", async () => {
+  it("renders the requested snapshot date with the archive picker selected", async () => {
     getSnapshotPageDataByDate.mockResolvedValue(buildSnapshot());
+    getSnapshotArchiveDates.mockResolvedValue([
+      "2026-03-29",
+      "2026-03-28",
+      "2026-03-27",
+    ]);
 
     render(
       await ArchivePage({
@@ -67,11 +83,13 @@ describe("ArchivePage", () => {
     );
 
     expect(getSnapshotPageDataByDate).toHaveBeenCalledWith("2026-03-28");
+    expect(getSnapshotArchiveDates).toHaveBeenCalled();
     expect(
       screen.getByRole("heading", {
         name: "2026-03-28 아카이브 호",
       }),
     ).toBeInTheDocument();
+    expect(screen.getByLabelText("아카이브 날짜")).toHaveValue("2026-03-28");
     expect(screen.getByText("지난 트렌드를 다시 읽는 하루치 오픈소스 다이제스트")).toBeInTheDocument();
     expect(screen.getByText("Captured Mar 28, 2026, 9:20 AM KST")).toBeInTheDocument();
     expect(screen.getAllByText("gamma/comet")).toHaveLength(2);
