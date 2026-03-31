@@ -1,4 +1,4 @@
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const { getLatestSnapshotPageData, getSnapshotArchiveDates } = vi.hoisted(() => ({
@@ -6,11 +6,21 @@ const { getLatestSnapshotPageData, getSnapshotArchiveDates } = vi.hoisted(() => 
   getSnapshotArchiveDates: vi.fn(),
 }));
 
+const { push } = vi.hoisted(() => ({
+  push: vi.fn(),
+}));
+
 import HomePage from "@/app/page";
 
 vi.mock("@/lib/snapshots/queries", () => ({
   getLatestSnapshotPageData,
   getSnapshotArchiveDates,
+}));
+
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({
+    push,
+  }),
 }));
 
 function buildSnapshot() {
@@ -85,6 +95,7 @@ describe("HomePage", () => {
   beforeEach(() => {
     getLatestSnapshotPageData.mockReset();
     getSnapshotArchiveDates.mockReset();
+    push.mockReset();
   });
 
   afterEach(() => {
@@ -238,7 +249,7 @@ describe("HomePage", () => {
     expect(screen.queryByRole("region", { name: "아카이브" })).not.toBeInTheDocument();
   });
 
-  it("renders archive navigation for every stored snapshot date", async () => {
+  it("renders the archive picker in the hero for every stored snapshot date", async () => {
     getLatestSnapshotPageData.mockResolvedValue(buildSnapshot());
     getSnapshotArchiveDates.mockResolvedValue([
       "2026-03-29",
@@ -248,16 +259,9 @@ describe("HomePage", () => {
 
     render(await HomePage());
 
-    const archiveSection = screen.getByRole("region", { name: "아카이브" });
-    const links = within(archiveSection).getAllByRole("link");
-
     expect(getSnapshotArchiveDates).toHaveBeenCalled();
-    expect(links.map((link) => link.textContent)).toEqual([
-      "2026-03-29",
-      "2026-03-28",
-      "2026-03-27",
-    ]);
-    expect(links[1]).toHaveAttribute("href", "/archive/2026-03-28");
+    expect(screen.getByLabelText("아카이브 날짜")).toHaveValue("2026-03-29");
+    expect(screen.queryByRole("region", { name: "아카이브" })).not.toBeInTheDocument();
   });
 
   it("omits archive navigation when there are no archive dates to show", async () => {

@@ -1,12 +1,16 @@
 import type { SnapshotPageData } from "@/lib/snapshots/queries";
 
+import { ArchiveDatePicker } from "@/components/trending/archive-date-picker";
+
 interface SnapshotHeroProps {
   snapshot: SnapshotPageData;
+  archiveDates?: string[];
   mode?: "latest" | "archive";
 }
 
 export function SnapshotHero({
   snapshot,
+  archiveDates = [],
   mode = "latest",
 }: SnapshotHeroProps) {
   const isArchive = mode === "archive";
@@ -36,6 +40,7 @@ export function SnapshotHero({
         <p className="meta-chip meta-chip--accent">{`${snapshot.snapshotDate} 발행`}</p>
         <p className="meta-chip">{snapshot.capturedAtLabel}</p>
         <p className="meta-chip">{`총 ${snapshot.totalCount}개 저장소`}</p>
+        <ArchiveDatePicker dates={archiveDates} currentDate={snapshot.snapshotDate} />
       </div>
     </section>
   );

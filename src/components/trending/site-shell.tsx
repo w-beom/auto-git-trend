@@ -1,6 +1,5 @@
 import type { SnapshotPageData } from "@/lib/snapshots/queries";
 
-import { ArchiveDateList } from "@/components/trending/archive-date-list";
 import { RepositoryList } from "@/components/trending/repository-list";
 import { SnapshotHero } from "@/components/trending/snapshot-hero";
 import { TopThreeGrid } from "@/components/trending/top-three-grid";
@@ -19,12 +18,9 @@ export function SiteShell({
   return (
     <main className="site-shell">
       <div className="poster-grid">
-        <SnapshotHero snapshot={snapshot} mode={mode} />
+        <SnapshotHero snapshot={snapshot} archiveDates={archiveDates} mode={mode} />
         <TopThreeGrid highlights={snapshot.topThree} items={snapshot.items} />
         <RepositoryList items={snapshot.items} />
-        {mode === "latest" && archiveDates.length > 0 ? (
-          <ArchiveDateList dates={archiveDates} />
-        ) : null}
       </div>
     </main>
   );
