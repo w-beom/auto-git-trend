@@ -5,7 +5,7 @@ import {
 import { EmptyState } from "@/components/trending/empty-state";
 import { SiteShell } from "@/components/trending/site-shell";
 
-export const dynamic = "force-dynamic";
+export const revalidate = 300;
 
 export default async function HomePage() {
   const [snapshot, archiveDates] = await Promise.all([

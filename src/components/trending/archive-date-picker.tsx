@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 interface ArchiveDatePickerProps {
@@ -39,39 +39,63 @@ function buildMonthDays(visibleMonth: string) {
   return days;
 }
 
+function routeForSnapshotDate(snapshotDate: string, latestDate: string) {
+  return snapshotDate === latestDate ? "/" : `/archive/${snapshotDate}`;
+}
+
 export function ArchiveDatePicker({
   dates,
   currentDate,
 }: ArchiveDatePickerProps) {
   const router = useRouter();
   const [isOpen, setIsOpen] = useState(false);
-  const [visibleMonth, setVisibleMonth] = useState(currentDate.slice(0, 7));
+  const [visibleMonthOverride, setVisibleMonthOverride] = useState<string | null>(null);
+  const prefetchedRoutesRef = useRef(new Set<string>());
+  const visibleMonth = visibleMonthOverride ?? currentDate.slice(0, 7);
   const availableMonths = useMemo(
     () => Array.from(new Set(dates.map((date) => date.slice(0, 7)))).sort(),
     [dates],
   );
   const storedDates = useMemo(() => new Set(dates), [dates]);
   const monthDays = useMemo(() => buildMonthDays(visibleMonth), [visibleMonth]);
+  const hasArchiveDates = dates.length >= 2 && storedDates.has(currentDate);
 
-  if (dates.length < 2 || !dates.includes(currentDate)) {
-    return null;
-  }
-
-  const latestDate = dates[0];
+  const latestDate = dates[0] ?? currentDate;
   const visibleMonthIndex = availableMonths.indexOf(visibleMonth);
   const canShowPreviousMonth = visibleMonthIndex > 0;
   const canShowNextMonth =
     visibleMonthIndex >= 0 && visibleMonthIndex < availableMonths.length - 1;
 
   useEffect(() => {
-    setVisibleMonth(currentDate.slice(0, 7));
-    setIsOpen(false);
-  }, [currentDate]);
+    if (!hasArchiveDates || !isOpen) {
+      return;
+    }
+
+    monthDays.forEach((entry) => {
+      if (!entry || !storedDates.has(entry.iso)) {
+        return;
+      }
+
+      const route = routeForSnapshotDate(entry.iso, latestDate);
+
+      if (prefetchedRoutesRef.current.has(route)) {
+        return;
+      }
+
+      prefetchedRoutesRef.current.add(route);
+      router.prefetch(route);
+    });
+  }, [hasArchiveDates, isOpen, latestDate, monthDays, router, storedDates]);
+
+  if (!hasArchiveDates) {
+    return null;
+  }
 
   function routeToDate(nextDate: string) {
-    const targetRoute = nextDate === latestDate ? "/" : `/archive/${nextDate}`;
+    const targetRoute = routeForSnapshotDate(nextDate, latestDate);
 
     setIsOpen(false);
+    setVisibleMonthOverride(null);
     logSnapshotDiagnostic("navigation", {
       currentDate,
       nextDate,
@@ -88,7 +112,17 @@ export function ArchiveDatePicker({
         aria-expanded={isOpen}
         aria-haspopup="dialog"
         aria-label={`아카이브 날짜 ${currentDate}`}
-        onClick={() => setIsOpen((open) => !open)}
+        onClick={() =>
+          setIsOpen((open) => {
+            const nextOpen = !open;
+
+            if (nextOpen) {
+              setVisibleMonthOverride(null);
+            }
+
+            return nextOpen;
+          })
+        }
       >
         <span className="archive-date-picker__trigger-copy">
           <span className="archive-date-picker__label">아카이브 날짜</span>
@@ -113,7 +147,7 @@ export function ArchiveDatePicker({
               disabled={!canShowPreviousMonth}
               onClick={() => {
                 if (canShowPreviousMonth) {
-                  setVisibleMonth(availableMonths[visibleMonthIndex - 1]);
+                  setVisibleMonthOverride(availableMonths[visibleMonthIndex - 1]);
                 }
               }}
             >
@@ -127,7 +161,7 @@ export function ArchiveDatePicker({
               disabled={!canShowNextMonth}
               onClick={() => {
                 if (canShowNextMonth) {
-                  setVisibleMonth(availableMonths[visibleMonthIndex + 1]);
+                  setVisibleMonthOverride(availableMonths[visibleMonthIndex + 1]);
                 }
               }}
             >

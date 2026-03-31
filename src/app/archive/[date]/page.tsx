@@ -6,7 +6,7 @@ import {
   getSnapshotPageDataByDate,
 } from "@/lib/snapshots/queries";
 
-export const dynamic = "force-dynamic";
+export const revalidate = 300;
 
 interface ArchivePageProps {
   params: Promise<{

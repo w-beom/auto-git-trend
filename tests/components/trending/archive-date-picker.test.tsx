@@ -1,13 +1,15 @@
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const { push } = vi.hoisted(() => ({
+const { push, prefetch } = vi.hoisted(() => ({
   push: vi.fn(),
+  prefetch: vi.fn(),
 }));
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({
     push,
+    prefetch,
   }),
 }));
 
@@ -16,6 +18,7 @@ import { ArchiveDatePicker } from "@/components/trending/archive-date-picker";
 describe("ArchiveDatePicker", () => {
   beforeEach(() => {
     push.mockReset();
+    prefetch.mockReset();
   });
 
   afterEach(() => {
@@ -69,6 +72,22 @@ describe("ArchiveDatePicker", () => {
     fireEvent.click(screen.getByRole("button", { name: "아카이브 날짜 2026-03-30" }));
     fireEvent.click(screen.getByRole("button", { name: "2026-03-31" }));
     expect(push).toHaveBeenLastCalledWith("/");
+  });
+
+  it("prefetches visible stored dates when the calendar opens", () => {
+    render(
+      <ArchiveDatePicker
+        dates={["2026-03-31", "2026-03-30", "2026-03-28", "2026-02-27"]}
+        currentDate="2026-03-30"
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "아카이브 날짜 2026-03-30" }));
+
+    expect(prefetch).toHaveBeenCalledWith("/");
+    expect(prefetch).toHaveBeenCalledWith("/archive/2026-03-30");
+    expect(prefetch).toHaveBeenCalledWith("/archive/2026-03-28");
+    expect(prefetch).not.toHaveBeenCalledWith("/archive/2026-02-27");
   });
 
   it("renders nothing when fewer than two dates are available", () => {
