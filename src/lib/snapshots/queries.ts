@@ -29,6 +29,10 @@ interface SnapshotQueryRow {
   trending_snapshot_items: SnapshotItemQueryRow[] | null;
 }
 
+interface SnapshotDateRow {
+  snapshot_date: string;
+}
+
 export interface SnapshotPageItem {
   rank: number;
   owner: string;
@@ -231,4 +235,28 @@ export async function getSnapshotPageDataByDate(
   }
 
   return mapSnapshotRow(data);
+}
+
+export async function getSnapshotArchiveDates(): Promise<string[]> {
+  const client = createSnapshotQueryClient();
+
+  if (!client) {
+    return [];
+  }
+
+  const { data, error } = await client
+    .from("trending_snapshots")
+    .select("snapshot_date")
+    .eq("status", "success")
+    .order("snapshot_date", { ascending: false });
+
+  if (error) {
+    throw new Error(`Failed to load snapshot archive dates: ${error.message}`);
+  }
+
+  return Array.from(
+    new Set(
+      ((data ?? []) as SnapshotDateRow[]).map((row) => row.snapshot_date),
+    ),
+  );
 }
