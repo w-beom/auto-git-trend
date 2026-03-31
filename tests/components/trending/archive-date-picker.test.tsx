@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const { push } = vi.hoisted(() => ({
@@ -22,39 +22,58 @@ describe("ArchiveDatePicker", () => {
     cleanup();
   });
 
-  it("shows the current date as the selected value", () => {
+  it("shows the current date in the closed state", () => {
     render(
       <ArchiveDatePicker
-        dates={["2026-03-29", "2026-03-28", "2026-03-27"]}
-        currentDate="2026-03-28"
+        dates={["2026-03-31", "2026-03-30", "2026-03-28"]}
+        currentDate="2026-03-30"
       />,
     );
 
-    expect(screen.getByLabelText("아카이브 날짜")).toHaveValue("2026-03-28");
+    expect(
+      screen.getByRole("button", { name: "아카이브 날짜 2026-03-30" }),
+    ).toBeInTheDocument();
   });
 
-  it("routes older dates to archive pages and the latest date to the homepage", () => {
+  it("opens a calendar month view and disables dates that are not stored", () => {
     render(
       <ArchiveDatePicker
-        dates={["2026-03-29", "2026-03-28", "2026-03-27"]}
-        currentDate="2026-03-29"
+        dates={["2026-03-31", "2026-03-30", "2026-03-28"]}
+        currentDate="2026-03-30"
       />,
     );
 
-    fireEvent.change(screen.getByLabelText("아카이브 날짜"), {
-      target: { value: "2026-03-27" },
-    });
-    expect(push).toHaveBeenLastCalledWith("/archive/2026-03-27");
+    fireEvent.click(screen.getByRole("button", { name: "아카이브 날짜 2026-03-30" }));
 
-    fireEvent.change(screen.getByLabelText("아카이브 날짜"), {
-      target: { value: "2026-03-29" },
-    });
+    const dialog = screen.getByRole("dialog", { name: "아카이브 날짜 선택" });
+    expect(within(dialog).getByRole("button", { name: "2026-03-31" })).toBeEnabled();
+    expect(within(dialog).getByRole("button", { name: "2026-03-30" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(within(dialog).getByRole("button", { name: "2026-03-29" })).toBeDisabled();
+  });
+
+  it("routes stored older dates to archive pages and the latest date to the homepage", () => {
+    render(
+      <ArchiveDatePicker
+        dates={["2026-03-31", "2026-03-30", "2026-03-28"]}
+        currentDate="2026-03-30"
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "아카이브 날짜 2026-03-30" }));
+    fireEvent.click(screen.getByRole("button", { name: "2026-03-28" }));
+    expect(push).toHaveBeenLastCalledWith("/archive/2026-03-28");
+
+    fireEvent.click(screen.getByRole("button", { name: "아카이브 날짜 2026-03-30" }));
+    fireEvent.click(screen.getByRole("button", { name: "2026-03-31" }));
     expect(push).toHaveBeenLastCalledWith("/");
   });
 
   it("renders nothing when fewer than two dates are available", () => {
     const { container } = render(
-      <ArchiveDatePicker dates={["2026-03-29"]} currentDate="2026-03-29" />,
+      <ArchiveDatePicker dates={["2026-03-31"]} currentDate="2026-03-31" />,
     );
 
     expect(container).toBeEmptyDOMElement();

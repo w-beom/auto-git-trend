@@ -89,7 +89,9 @@ describe("ArchivePage", () => {
         name: "2026-03-28 아카이브 호",
       }),
     ).toBeInTheDocument();
-    expect(screen.getByLabelText("아카이브 날짜")).toHaveValue("2026-03-28");
+    expect(
+      screen.getByRole("button", { name: "아카이브 날짜 2026-03-28" }),
+    ).toBeInTheDocument();
     expect(screen.getByText("지난 트렌드를 다시 읽는 하루치 오픈소스 다이제스트")).toBeInTheDocument();
     expect(screen.getByText("Captured Mar 28, 2026, 9:20 AM KST")).toBeInTheDocument();
     expect(screen.getAllByText("gamma/comet")).toHaveLength(2);
