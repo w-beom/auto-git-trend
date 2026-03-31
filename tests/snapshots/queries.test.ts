@@ -132,6 +132,67 @@ function createSupabaseListClientDouble(
   };
 }
 
+function createPromiseLikeOnlyListClientDouble(
+  listHandler: (input: ListQueryInvocation) => Promise<{
+    data: unknown;
+    error: { message: string } | null;
+  }>,
+) {
+  function wrapPromiseLike<T>(promise: Promise<T>): PromiseLike<T> {
+    return {
+      then<TResult1 = T, TResult2 = never>(
+        onfulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | null,
+        onrejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null,
+      ) {
+        return wrapPromiseLike(Promise.resolve(promise.then(onfulfilled, onrejected)));
+      },
+    };
+  }
+
+  return {
+    from() {
+      return {
+        select(columns: string) {
+          const filters: Array<[string, unknown]> = [];
+          let orderBy: ListQueryInvocation["orderBy"];
+
+          const query = {
+            eq(field: string, value: unknown) {
+              filters.push([field, value]);
+              return query;
+            },
+            order(column: string, options: { ascending?: boolean }) {
+              orderBy = {
+                column,
+                ascending: options.ascending,
+              };
+              return query;
+            },
+            then<TResult1 = unknown, TResult2 = never>(
+              onfulfilled?:
+                | ((
+                    value: { data: unknown; error: { message: string } | null },
+                  ) => TResult1 | PromiseLike<TResult1>)
+                | null,
+              onrejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null,
+            ) {
+              return wrapPromiseLike(
+                listHandler({
+                  columns,
+                  filters,
+                  orderBy,
+                }).then(onfulfilled, onrejected),
+              );
+            },
+          };
+
+          return query;
+        },
+      };
+    },
+  };
+}
+
 const originalEnv = process.env;
 
 describe("snapshot queries", () => {
@@ -345,6 +406,36 @@ describe("snapshot queries", () => {
     await expect(getSnapshotArchiveDates()).resolves.toEqual(["2026-03-29", "2026-03-28"]);
 
     expect(createClient).toHaveBeenCalledTimes(1);
+    expect(listHandler).toHaveBeenCalledTimes(1);
+  });
+
+  it("supports PromiseLike-only archive date queries", async () => {
+    const listHandler = vi.fn(async ({ columns, filters, orderBy }: ListQueryInvocation) => {
+      expect(columns).toBe("snapshot_date");
+      expect(filters).toEqual([["status", "success"]]);
+      expect(orderBy).toEqual({
+        column: "snapshot_date",
+        ascending: false,
+      });
+
+      return {
+        data: [
+          { snapshot_date: "2026-03-29" },
+          { snapshot_date: "2026-03-28" },
+        ],
+        error: null,
+      };
+    });
+
+    createClient.mockReturnValue(createPromiseLikeOnlyListClientDouble(listHandler));
+    process.env = {
+      SUPABASE_URL: "https://example.supabase.co",
+      SUPABASE_SERVICE_ROLE_KEY: "service-role-key",
+    } as NodeJS.ProcessEnv;
+
+    const { getSnapshotArchiveDates } = await import("@/lib/snapshots/queries");
+
+    await expect(getSnapshotArchiveDates()).resolves.toEqual(["2026-03-29", "2026-03-28"]);
     expect(listHandler).toHaveBeenCalledTimes(1);
   });
 

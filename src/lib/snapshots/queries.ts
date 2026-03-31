@@ -312,12 +312,14 @@ export async function getSnapshotArchiveDates(): Promise<string[]> {
     return [];
   }
 
-  snapshotArchiveDatesPendingPromise = client
-    .from("trending_snapshots")
-    .select("snapshot_date")
-    .eq("status", "success")
-    .order("snapshot_date", { ascending: false })
-    .then(({ data, error }) => {
+  snapshotArchiveDatesPendingPromise = (async () => {
+    try {
+      const { data, error } = await client
+        .from("trending_snapshots")
+        .select("snapshot_date")
+        .eq("status", "success")
+        .order("snapshot_date", { ascending: false });
+
       if (error) {
         throw new Error(`Failed to load snapshot archive dates: ${error.message}`);
       }
@@ -334,10 +336,10 @@ export async function getSnapshotArchiveDates(): Promise<string[]> {
       };
 
       return result;
-    })
-    .finally(() => {
+    } finally {
       snapshotArchiveDatesPendingPromise = null;
-    });
+    }
+  })();
 
   const result = await snapshotArchiveDatesPendingPromise;
 
