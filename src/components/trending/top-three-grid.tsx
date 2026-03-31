@@ -17,6 +17,26 @@ interface TopThreeGridProps {
   items: SnapshotPageItem[];
 }
 
+function getDiagnosticNow() {
+  if (typeof performance !== "undefined" && typeof performance.now === "function") {
+    return performance.now();
+  }
+
+  return Date.now();
+}
+
+function roundDuration(durationMs: number) {
+  return Number(durationMs.toFixed(2));
+}
+
+function logSnapshotDiagnostic(label: string, details: Record<string, unknown>) {
+  if (process.env.NODE_ENV === "production") {
+    return;
+  }
+
+  console.info(`[snapshot-diag] ${label}`, details);
+}
+
 export function TopThreeGrid({
   highlights,
   items,
@@ -32,7 +52,11 @@ export function TopThreeGrid({
     .filter((item): item is SnapshotPageItem => item !== undefined);
   const hasTopItems = topItems.length > 0;
 
-  function measureSectionHeightOffset(nextViewportHeight = carouselViewportHeight) {
+  function measureSectionHeightOffset(
+    nextViewportHeight = carouselViewportHeight,
+    cause = "unknown",
+  ) {
+    const startedAt = getDiagnosticNow();
     const section = sectionRef.current;
     const content = contentRef.current;
 
@@ -43,11 +67,19 @@ export function TopThreeGrid({
     const sectionStyles = window.getComputedStyle(section);
     const paddingTop = Number.parseFloat(sectionStyles.paddingTop) || 0;
     const paddingBottom = Number.parseFloat(sectionStyles.paddingBottom) || 0;
-    const nextHeight = Math.ceil(
-      content.getBoundingClientRect().height + paddingTop + paddingBottom - nextViewportHeight,
+    const sectionHeight = Math.ceil(
+      content.getBoundingClientRect().height + paddingTop + paddingBottom,
     );
+    const nextHeight = sectionHeight - nextViewportHeight;
 
     if (nextHeight > 0) {
+      logSnapshotDiagnostic("section-height", {
+        cause,
+        viewportHeight: nextViewportHeight,
+        sectionHeight,
+        computedOffset: nextHeight,
+        durationMs: roundDuration(getDiagnosticNow() - startedAt),
+      });
       setSectionHeightOffset((currentOffset) =>
         currentOffset === nextHeight ? currentOffset : nextHeight,
       );
@@ -56,7 +88,7 @@ export function TopThreeGrid({
 
   useLayoutEffect(() => {
     if (sectionHeightOffset === null) {
-      measureSectionHeightOffset();
+      measureSectionHeightOffset(undefined, "layout-effect");
     }
   }, [carouselViewportHeight, sectionHeightOffset, topItems.length]);
 
@@ -65,7 +97,7 @@ export function TopThreeGrid({
 
     function handleResize() {
       frameId = window.requestAnimationFrame(() => {
-        measureSectionHeightOffset();
+        measureSectionHeightOffset(undefined, "resize");
       });
     }
 

@@ -536,4 +536,138 @@ describe("TopThreeGrid", () => {
       expect(section.style.getPropertyValue("--top-three-section-height")).toBe("680px");
     });
   });
+
+  it("emits diagnostics for carousel and section height measurements", async () => {
+    const consoleInfo = vi.spyOn(console, "info").mockImplementation(() => {});
+
+    render(
+      <TopThreeGrid
+        highlights={[
+          { rank: 1, fullName: "acme/rocket", summaryKo: "첫 카드" },
+          { rank: 2, fullName: "beta/beam", summaryKo: "둘째 카드" },
+          { rank: 3, fullName: "charlie/cloud", summaryKo: "셋째 카드" },
+        ]}
+        items={[
+          {
+            rank: 1,
+            fullName: "acme/rocket",
+            owner: "acme",
+            name: "rocket",
+            githubUrl: "https://github.com/acme/rocket",
+            summaryKo: "첫 카드",
+            description: null,
+            readmeExcerpt: null,
+            primaryLanguage: null,
+            starsToday: null,
+            starsTotal: 4200,
+            forksTotal: 210,
+            avatarUrl: null,
+          },
+          {
+            rank: 2,
+            fullName: "beta/beam",
+            owner: "beta",
+            name: "beam",
+            githubUrl: "https://github.com/beta/beam",
+            summaryKo: "둘째 카드",
+            description: null,
+            readmeExcerpt: null,
+            primaryLanguage: null,
+            starsToday: null,
+            starsTotal: 2100,
+            forksTotal: 140,
+            avatarUrl: null,
+          },
+          {
+            rank: 3,
+            fullName: "charlie/cloud",
+            owner: "charlie",
+            name: "cloud",
+            githubUrl: "https://github.com/charlie/cloud",
+            summaryKo: "셋째 카드",
+            description: null,
+            readmeExcerpt: null,
+            primaryLanguage: null,
+            starsToday: null,
+            starsTotal: 1900,
+            forksTotal: 110,
+            avatarUrl: null,
+          },
+        ]}
+      />,
+    );
+
+    const section = screen.getByRole("region", { name: "오늘의 톱 3" });
+    const content = section.querySelector(".section-block__content--top-three") as HTMLDivElement | null;
+    const slides = Array.from(
+      section.querySelectorAll(".top-three-carousel__slide"),
+    ) as HTMLDivElement[];
+    const nextButton = screen.getByRole("button", { name: "다음 톱3 카드" });
+
+    expect(content).not.toBeNull();
+    expect(slides).toHaveLength(3);
+
+    if (!content || slides.length !== 3) {
+      return;
+    }
+
+    Object.defineProperty(content, "getBoundingClientRect", {
+      configurable: true,
+      value: () => ({
+        width: 320,
+        height: 540,
+        top: 0,
+        left: 0,
+        right: 320,
+        bottom: 540,
+        x: 0,
+        y: 0,
+        toJSON() {
+          return {};
+        },
+      }),
+    });
+
+    [420, 560, 480].forEach((height, index) => {
+      Object.defineProperty(slides[index], "getBoundingClientRect", {
+        configurable: true,
+        value: () => ({
+          width: 320,
+          height,
+          top: 0,
+          left: 0,
+          right: 320,
+          bottom: height,
+          x: 0,
+          y: 0,
+          toJSON() {
+            return {};
+          },
+        }),
+      });
+    });
+
+    fireEvent(window, new Event("resize"));
+    fireEvent.click(nextButton);
+
+    await waitFor(() => {
+      expect(consoleInfo).toHaveBeenCalledWith(
+        "[snapshot-diag] carousel-height",
+        expect.objectContaining({
+          cause: "nav-click",
+          index: 1,
+          height: 560,
+        }),
+      );
+      expect(consoleInfo).toHaveBeenCalledWith(
+        "[snapshot-diag] section-height",
+        expect.objectContaining({
+          cause: "layout-effect",
+          viewportHeight: 420,
+          sectionHeight: 540,
+          computedOffset: 120,
+        }),
+      );
+    });
+  });
 });

@@ -20,6 +20,26 @@ interface TopThreeCarouselProps {
   onViewportHeightChange?: Dispatch<SetStateAction<number | null>> | ((height: number | null) => void);
 }
 
+function getDiagnosticNow() {
+  if (typeof performance !== "undefined" && typeof performance.now === "function") {
+    return performance.now();
+  }
+
+  return Date.now();
+}
+
+function roundDuration(durationMs: number) {
+  return Number(durationMs.toFixed(2));
+}
+
+function logSnapshotDiagnostic(label: string, details: Record<string, unknown>) {
+  if (process.env.NODE_ENV === "production") {
+    return;
+  }
+
+  console.info(`[snapshot-diag] ${label}`, details);
+}
+
 function clampIndex(value: number, length: number) {
   if (length <= 0) {
     return 0;
@@ -38,7 +58,8 @@ export function TopThreeCarousel({
   const [viewportHeight, setViewportHeight] = useState<number | null>(null);
   const activeIndexRef = useRef(0);
 
-  function updateViewportHeight(nextIndex: number) {
+  function updateViewportHeight(nextIndex: number, cause = "unknown") {
+    const startedAt = getDiagnosticNow();
     const slide = slideRefs.current[nextIndex];
 
     if (!slide) {
@@ -48,17 +69,23 @@ export function TopThreeCarousel({
     const nextHeight = Math.ceil(slide.getBoundingClientRect().height);
 
     if (nextHeight > 0) {
+      logSnapshotDiagnostic("carousel-height", {
+        cause,
+        index: nextIndex,
+        height: nextHeight,
+        durationMs: roundDuration(getDiagnosticNow() - startedAt),
+      });
       setViewportHeight((currentHeight) =>
         currentHeight === nextHeight ? currentHeight : nextHeight,
       );
     }
   }
 
-  function updateActiveIndex(nextIndex: number) {
+  function updateActiveIndex(nextIndex: number, cause = "unknown") {
     const clampedIndex = clampIndex(nextIndex, items.length);
 
     activeIndexRef.current = clampedIndex;
-    updateViewportHeight(clampedIndex);
+    updateViewportHeight(clampedIndex, cause);
     startTransition(() => {
       setActiveIndex(clampedIndex);
     });
@@ -68,7 +95,7 @@ export function TopThreeCarousel({
     const nextIndex = Math.round(track.scrollLeft / Math.max(track.clientWidth, 1));
 
     if (nextIndex !== activeIndexRef.current) {
-      updateActiveIndex(nextIndex);
+      updateActiveIndex(nextIndex, "scroll");
     }
   }
 
@@ -76,7 +103,7 @@ export function TopThreeCarousel({
     syncActiveIndex(event.currentTarget);
   }
 
-  function scrollToIndex(index: number) {
+  function scrollToIndex(index: number, cause = "unknown") {
     const clampedIndex = clampIndex(index, items.length);
     const track = trackRef.current;
 
@@ -98,28 +125,28 @@ export function TopThreeCarousel({
       }
     }
 
-    updateActiveIndex(clampedIndex);
+    updateActiveIndex(clampedIndex, cause);
   }
 
   function handlePagerClick(index: number) {
-    scrollToIndex(index);
+    scrollToIndex(index, "pager-click");
   }
 
   function handlePreviousClick() {
-    scrollToIndex(activeIndexRef.current - 1);
+    scrollToIndex(activeIndexRef.current - 1, "nav-click");
   }
 
   function handleNextClick() {
-    scrollToIndex(activeIndexRef.current + 1);
+    scrollToIndex(activeIndexRef.current + 1, "nav-click");
   }
 
   useLayoutEffect(() => {
-    updateViewportHeight(activeIndexRef.current);
+    updateViewportHeight(activeIndexRef.current, "layout-effect");
   }, [items.length]);
 
   useEffect(() => {
     function handleResize() {
-      updateViewportHeight(activeIndexRef.current);
+      updateViewportHeight(activeIndexRef.current, "resize");
     }
 
     window.addEventListener("resize", handleResize);
@@ -135,7 +162,7 @@ export function TopThreeCarousel({
     }
 
     const resizeObserver = new ResizeObserver(() => {
-      updateViewportHeight(activeIndexRef.current);
+      updateViewportHeight(activeIndexRef.current, "observer");
     });
 
     slideRefs.current.forEach((slide) => {

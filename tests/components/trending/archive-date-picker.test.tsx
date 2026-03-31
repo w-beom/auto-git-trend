@@ -78,4 +78,27 @@ describe("ArchiveDatePicker", () => {
 
     expect(container).toBeEmptyDOMElement();
   });
+
+  it("emits a navigation diagnostic when a stored date is selected", () => {
+    const consoleInfo = vi.spyOn(console, "info").mockImplementation(() => {});
+
+    render(
+      <ArchiveDatePicker
+        dates={["2026-03-31", "2026-03-30", "2026-03-28"]}
+        currentDate="2026-03-30"
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "아카이브 날짜 2026-03-30" }));
+    fireEvent.click(screen.getByRole("button", { name: "2026-03-28" }));
+
+    expect(consoleInfo).toHaveBeenCalledWith(
+      "[snapshot-diag] navigation",
+      expect.objectContaining({
+        currentDate: "2026-03-30",
+        nextDate: "2026-03-28",
+        targetRoute: "/archive/2026-03-28",
+      }),
+    );
+  });
 });

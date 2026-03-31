@@ -3,9 +3,7 @@ import { z } from "zod";
 
 interface SnapshotItemQueryRow {
   rank: number;
-  stars_today: number | null;
   repo_description_snapshot: string | null;
-  readme_excerpt: string | null;
   summary_ko: string;
   repository: RepositoryQueryRow | null;
 }
@@ -15,11 +13,8 @@ interface RepositoryQueryRow {
   name: string;
   full_name: string;
   github_url: string;
-  description: string | null;
-  primary_language: string | null;
   stars_total: number | null;
   forks_total: number | null;
-  avatar_url: string | null;
 }
 
 interface SnapshotQueryRow {
@@ -70,28 +65,53 @@ const SNAPSHOT_SELECT = `
   item_count,
   trending_snapshot_items (
     rank,
-    stars_today,
     repo_description_snapshot,
-    readme_excerpt,
     summary_ko,
     repository:repositories (
       owner,
       name,
       full_name,
       github_url,
-      description,
-      primary_language,
       stars_total,
-      forks_total,
-      avatar_url
+      forks_total
     )
   )
 `;
+
+const SNAPSHOT_ARCHIVE_DATES_TTL_MS = 60_000;
+
+let snapshotArchiveDatesCache:
+  | {
+      expiresAt: number;
+      value: string[];
+    }
+  | null = null;
+let snapshotArchiveDatesPendingPromise: Promise<string[]> | null = null;
 
 const snapshotQueryEnvSchema = z.object({
   SUPABASE_URL: z.string().url(),
   SUPABASE_SERVICE_ROLE_KEY: z.string().min(1),
 });
+
+function getDiagnosticNow() {
+  if (typeof performance !== "undefined" && typeof performance.now === "function") {
+    return performance.now();
+  }
+
+  return Date.now();
+}
+
+function roundDuration(durationMs: number) {
+  return Number(durationMs.toFixed(2));
+}
+
+function logSnapshotDiagnostic(label: string, details: Record<string, unknown>) {
+  if (process.env.NODE_ENV === "production") {
+    return;
+  }
+
+  console.info(`[snapshot-diag] ${label}`, details);
+}
 
 function formatEnvIssues(issues: z.ZodIssue[]): string {
   return issues
@@ -165,13 +185,13 @@ function mapSnapshotRow(row: SnapshotQueryRow | null): SnapshotPageData | null {
       fullName: item.repository.full_name,
       githubUrl: item.repository.github_url,
       summaryKo: item.summary_ko,
-      description: item.repo_description_snapshot ?? item.repository.description,
-      readmeExcerpt: item.readme_excerpt,
-      primaryLanguage: item.repository.primary_language,
-      starsToday: item.stars_today,
+      description: item.repo_description_snapshot,
+      readmeExcerpt: null,
+      primaryLanguage: null,
+      starsToday: null,
       starsTotal: item.repository.stars_total,
       forksTotal: item.repository.forks_total,
-      avatarUrl: item.repository.avatar_url,
+      avatarUrl: null,
     }));
 
   return {
@@ -189,6 +209,7 @@ function mapSnapshotRow(row: SnapshotQueryRow | null): SnapshotPageData | null {
 }
 
 export async function getLatestSnapshotPageData(): Promise<SnapshotPageData | null> {
+  const startedAt = getDiagnosticNow();
   const client = createSnapshotQueryClient();
 
   if (!client) {
@@ -207,12 +228,23 @@ export async function getLatestSnapshotPageData(): Promise<SnapshotPageData | nu
     throw new Error(`Failed to load latest snapshot page data: ${error.message}`);
   }
 
-  return mapSnapshotRow(data);
+  const result = mapSnapshotRow(data);
+
+  logSnapshotDiagnostic("query", {
+    name: "getLatestSnapshotPageData",
+    durationMs: roundDuration(getDiagnosticNow() - startedAt),
+    itemCount: result?.items.length ?? 0,
+    snapshotDate: result?.snapshotDate ?? null,
+  });
+
+  return result;
 }
 
 export async function getSnapshotPageDataByDate(
   snapshotDate: string,
 ): Promise<SnapshotPageData | null> {
+  const startedAt = getDiagnosticNow();
+
   if (!/^\d{4}-\d{2}-\d{2}$/.test(snapshotDate)) {
     return null;
   }
@@ -234,29 +266,87 @@ export async function getSnapshotPageDataByDate(
     throw new Error(`Failed to load snapshot ${snapshotDate}: ${error.message}`);
   }
 
-  return mapSnapshotRow(data);
+  const result = mapSnapshotRow(data);
+
+  logSnapshotDiagnostic("query", {
+    name: "getSnapshotPageDataByDate",
+    durationMs: roundDuration(getDiagnosticNow() - startedAt),
+    itemCount: result?.items.length ?? 0,
+    snapshotDate,
+  });
+
+  return result;
 }
 
 export async function getSnapshotArchiveDates(): Promise<string[]> {
+  const startedAt = getDiagnosticNow();
+  const now = Date.now();
+
+  if (snapshotArchiveDatesCache && snapshotArchiveDatesCache.expiresAt > now) {
+    logSnapshotDiagnostic("query", {
+      name: "getSnapshotArchiveDates",
+      durationMs: roundDuration(getDiagnosticNow() - startedAt),
+      dateCount: snapshotArchiveDatesCache.value.length,
+      cacheStatus: "hit",
+    });
+
+    return snapshotArchiveDatesCache.value;
+  }
+
+  if (snapshotArchiveDatesPendingPromise) {
+    const result = await snapshotArchiveDatesPendingPromise;
+
+    logSnapshotDiagnostic("query", {
+      name: "getSnapshotArchiveDates",
+      durationMs: roundDuration(getDiagnosticNow() - startedAt),
+      dateCount: result.length,
+      cacheStatus: "pending-hit",
+    });
+
+    return result;
+  }
+
   const client = createSnapshotQueryClient();
 
   if (!client) {
     return [];
   }
 
-  const { data, error } = await client
+  snapshotArchiveDatesPendingPromise = client
     .from("trending_snapshots")
     .select("snapshot_date")
     .eq("status", "success")
-    .order("snapshot_date", { ascending: false });
+    .order("snapshot_date", { ascending: false })
+    .then(({ data, error }) => {
+      if (error) {
+        throw new Error(`Failed to load snapshot archive dates: ${error.message}`);
+      }
 
-  if (error) {
-    throw new Error(`Failed to load snapshot archive dates: ${error.message}`);
-  }
+      const result = Array.from(
+        new Set(
+          ((data ?? []) as SnapshotDateRow[]).map((row) => row.snapshot_date),
+        ),
+      );
 
-  return Array.from(
-    new Set(
-      ((data ?? []) as SnapshotDateRow[]).map((row) => row.snapshot_date),
-    ),
-  );
+      snapshotArchiveDatesCache = {
+        expiresAt: Date.now() + SNAPSHOT_ARCHIVE_DATES_TTL_MS,
+        value: result,
+      };
+
+      return result;
+    })
+    .finally(() => {
+      snapshotArchiveDatesPendingPromise = null;
+    });
+
+  const result = await snapshotArchiveDatesPendingPromise;
+
+  logSnapshotDiagnostic("query", {
+    name: "getSnapshotArchiveDates",
+    durationMs: roundDuration(getDiagnosticNow() - startedAt),
+    dateCount: result.length,
+    cacheStatus: "miss",
+  });
+
+  return result;
 }

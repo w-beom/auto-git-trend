@@ -10,6 +10,14 @@ interface ArchiveDatePickerProps {
 
 const WEEKDAY_LABELS = ["일", "월", "화", "수", "목", "금", "토"];
 
+function logSnapshotDiagnostic(label: string, details: Record<string, unknown>) {
+  if (process.env.NODE_ENV === "production") {
+    return;
+  }
+
+  console.info(`[snapshot-diag] ${label}`, details);
+}
+
 function buildMonthDays(visibleMonth: string) {
   const [year, month] = visibleMonth.split("-").map(Number);
   const firstDay = new Date(Date.UTC(year, month - 1, 1));
@@ -61,8 +69,15 @@ export function ArchiveDatePicker({
   }, [currentDate]);
 
   function routeToDate(nextDate: string) {
+    const targetRoute = nextDate === latestDate ? "/" : `/archive/${nextDate}`;
+
     setIsOpen(false);
-    router.push(nextDate === latestDate ? "/" : `/archive/${nextDate}`);
+    logSnapshotDiagnostic("navigation", {
+      currentDate,
+      nextDate,
+      targetRoute,
+    });
+    router.push(targetRoute);
   }
 
   return (

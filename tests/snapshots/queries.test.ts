@@ -27,6 +27,18 @@ interface ListQueryInvocation {
   };
 }
 
+function expectSlimSnapshotColumns(columns: string) {
+  expect(columns).toContain("repo_description_snapshot");
+  expect(columns).toContain("summary_ko");
+  expect(columns).toContain("stars_total");
+  expect(columns).toContain("forks_total");
+  expect(columns).not.toContain("readme_excerpt");
+  expect(columns).not.toContain("stars_today");
+  expect(columns).not.toContain("primary_language");
+  expect(columns).not.toContain("avatar_url");
+  expect(columns).not.toMatch(/\brepository:repositories\s*\([^)]*\bdescription\b/);
+}
+
 function createSupabaseClientDouble(
   maybeSingleHandler: (input: QueryInvocation) => Promise<{
     data: unknown;
@@ -135,7 +147,8 @@ describe("snapshot queries", () => {
 
   it("formats latest snapshot labels in KST using only Supabase env", async () => {
     createClient.mockReturnValue(
-      createSupabaseClientDouble(async ({ filters, orderBy, limit }) => {
+      createSupabaseClientDouble(async ({ columns, filters, orderBy, limit }) => {
+        expectSlimSnapshotColumns(columns);
         expect(filters).toEqual([["status", "success"]]);
         expect(orderBy).toEqual({
           column: "snapshot_date",
@@ -151,20 +164,15 @@ describe("snapshot queries", () => {
             trending_snapshot_items: [
               {
                 rank: 1,
-                stars_today: 120,
                 repo_description_snapshot: "A fast launch platform.",
-                readme_excerpt: null,
                 summary_ko: "빠르게 배포할 수 있는 로켓 플랫폼입니다.",
                 repository: {
                   owner: "acme",
                   name: "rocket",
                   full_name: "acme/rocket",
                   github_url: "https://github.com/acme/rocket",
-                  description: "A fast launch platform.",
-                  primary_language: "TypeScript",
                   stars_total: 4200,
                   forks_total: 210,
-                  avatar_url: "https://example.com/acme.png",
                 },
               },
             ],
@@ -195,6 +203,15 @@ describe("snapshot queries", () => {
       snapshotDate: "2026-03-29",
       capturedAtLabel: "Captured Mar 29, 2026, 9:15 AM KST",
       totalCount: 1,
+      items: [
+        {
+          description: "A fast launch platform.",
+          readmeExcerpt: null,
+          primaryLanguage: null,
+          starsToday: null,
+          avatarUrl: null,
+        },
+      ],
     });
   });
 
@@ -211,7 +228,8 @@ describe("snapshot queries", () => {
 
   it("formats archive snapshot labels in KST", async () => {
     createClient.mockReturnValue(
-      createSupabaseClientDouble(async ({ filters }) => {
+      createSupabaseClientDouble(async ({ columns, filters }) => {
+        expectSlimSnapshotColumns(columns);
         expect(filters).toEqual([
           ["status", "success"],
           ["snapshot_date", "2026-03-28"],
@@ -225,20 +243,15 @@ describe("snapshot queries", () => {
             trending_snapshot_items: [
               {
                 rank: 1,
-                stars_today: 77,
                 repo_description_snapshot: "Static deploy automation.",
-                readme_excerpt: null,
                 summary_ko: "정적 사이트 배포 흐름을 단순화합니다.",
                 repository: {
                   owner: "gamma",
                   name: "comet",
                   full_name: "gamma/comet",
                   github_url: "https://github.com/gamma/comet",
-                  description: "Static deploy automation.",
-                  primary_language: "Go",
                   stars_total: 1800,
                   forks_total: 44,
-                  avatar_url: "https://example.com/gamma.png",
                 },
               },
             ],
@@ -300,5 +313,90 @@ describe("snapshot queries", () => {
 
     await expect(getSnapshotArchiveDates()).resolves.toEqual([]);
     expect(createClient).not.toHaveBeenCalled();
+  });
+
+  it("reuses cached archive dates across repeated calls", async () => {
+    const listHandler = vi.fn(async ({ columns, filters, orderBy }: ListQueryInvocation) => {
+      expect(columns).toBe("snapshot_date");
+      expect(filters).toEqual([["status", "success"]]);
+      expect(orderBy).toEqual({
+        column: "snapshot_date",
+        ascending: false,
+      });
+
+      return {
+        data: [
+          { snapshot_date: "2026-03-29" },
+          { snapshot_date: "2026-03-28" },
+        ],
+        error: null,
+      };
+    });
+
+    createClient.mockReturnValue(createSupabaseListClientDouble(listHandler));
+    process.env = {
+      SUPABASE_URL: "https://example.supabase.co",
+      SUPABASE_SERVICE_ROLE_KEY: "service-role-key",
+    } as NodeJS.ProcessEnv;
+
+    const { getSnapshotArchiveDates } = await import("@/lib/snapshots/queries");
+
+    await expect(getSnapshotArchiveDates()).resolves.toEqual(["2026-03-29", "2026-03-28"]);
+    await expect(getSnapshotArchiveDates()).resolves.toEqual(["2026-03-29", "2026-03-28"]);
+
+    expect(createClient).toHaveBeenCalledTimes(1);
+    expect(listHandler).toHaveBeenCalledTimes(1);
+  });
+
+  it("emits a non-production diagnostic for archive snapshot queries", async () => {
+    createClient.mockReturnValue(
+      createSupabaseClientDouble(async () => ({
+        data: {
+          snapshot_date: "2026-03-28",
+          captured_at: "2026-03-28T00:20:00.000Z",
+          item_count: 1,
+          trending_snapshot_items: [
+            {
+              rank: 1,
+              stars_today: 77,
+              repo_description_snapshot: "Static deploy automation.",
+              readme_excerpt: null,
+              summary_ko: "정적 사이트 배포 흐름을 단순화합니다.",
+              repository: {
+                owner: "gamma",
+                name: "comet",
+                full_name: "gamma/comet",
+                github_url: "https://github.com/gamma/comet",
+                description: "Static deploy automation.",
+                primary_language: "Go",
+                stars_total: 1800,
+                forks_total: 44,
+                avatar_url: "https://example.com/gamma.png",
+              },
+            },
+          ],
+        },
+        error: null,
+      })),
+    );
+    process.env = {
+      ...originalEnv,
+      NODE_ENV: "development",
+      SUPABASE_URL: "https://example.supabase.co",
+      SUPABASE_SERVICE_ROLE_KEY: "service-role-key",
+    } as NodeJS.ProcessEnv;
+    const consoleInfo = vi.spyOn(console, "info").mockImplementation(() => {});
+
+    const { getSnapshotPageDataByDate } = await import("@/lib/snapshots/queries");
+    await getSnapshotPageDataByDate("2026-03-28");
+
+    expect(consoleInfo).toHaveBeenCalledWith(
+      "[snapshot-diag] query",
+      expect.objectContaining({
+        name: "getSnapshotPageDataByDate",
+        snapshotDate: "2026-03-28",
+        itemCount: 1,
+      }),
+    );
   });
 });
