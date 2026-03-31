@@ -260,7 +260,9 @@ describe("HomePage", () => {
     render(await HomePage());
 
     expect(getSnapshotArchiveDates).toHaveBeenCalled();
-    expect(screen.getByLabelText("아카이브 날짜")).toHaveValue("2026-03-29");
+    expect(
+      screen.getByRole("button", { name: "아카이브 날짜 2026-03-29" }),
+    ).toBeInTheDocument();
     expect(screen.queryByRole("region", { name: "아카이브" })).not.toBeInTheDocument();
   });
 

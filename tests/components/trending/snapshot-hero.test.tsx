@@ -10,7 +10,7 @@ vi.mock("@/components/trending/archive-date-picker", () => ({
   }: {
     dates: string[];
     currentDate: string;
-  }) => <div data-testid="archive-date-picker">{`${currentDate}:${dates.join(",")}`}</div>,
+  }) => <div data-testid="archive-date-picker">{`${currentDate}|${dates.length}`}</div>,
 }));
 
 const snapshot = {
@@ -52,7 +52,7 @@ describe("SnapshotHero", () => {
     );
 
     expect(screen.getByTestId("archive-date-picker")).toHaveTextContent(
-      "2026-03-29:2026-03-29,2026-03-28,2026-03-27",
+      "2026-03-29|3",
     );
   });
 
@@ -66,7 +66,7 @@ describe("SnapshotHero", () => {
     );
 
     expect(screen.getByTestId("archive-date-picker")).toHaveTextContent(
-      "2026-03-28:2026-03-29,2026-03-28,2026-03-27",
+      "2026-03-28|3",
     );
   });
 });

@@ -10,18 +10,27 @@ function readGlobalsCss() {
 }
 
 describe("archive date picker css", () => {
-  it("styles the hero archive picker like a meta control", () => {
+  it("styles the archive picker as a calendar popover and aligns hero meta boxes", () => {
     const css = readGlobalsCss();
 
     expect(css).toMatch(
-      /\.archive-date-picker\s*\{[^}]*display:\s*grid;[^}]*gap:/,
+      /\.hero-panel__meta\s*\{[^}]*display:\s*flex;[^}]*align-items:\s*stretch;/,
     );
     expect(css).toMatch(
-      /\.archive-date-picker__control\s*\{[^}]*border:\s*var\(--border-md\);[^}]*box-shadow:\s*var\(--shadow-md\);/,
+      /\.meta-chip\s*\{[^}]*min-height:\s*72px;[^}]*display:\s*inline-flex;[^}]*align-items:\s*center;/,
+    );
+    expect(css).toMatch(
+      /\.archive-date-picker__trigger\s*\{[^}]*min-height:\s*72px;[^}]*border:\s*var\(--border-md\);[^}]*box-shadow:\s*var\(--shadow-md\);/,
+    );
+    expect(css).toMatch(
+      /\.archive-date-picker__popover\s*\{[^}]*position:\s*absolute;[^}]*z-index:\s*10;/,
+    );
+    expect(css).toMatch(
+      /\.archive-date-picker__day\[disabled\]\s*\{[^}]*opacity:\s*0\.35;/,
     );
     expect(css).toMatch(
       /\.archive-date-picker__label\s*\{[^}]*font-size:\s*0\.72rem;[^}]*text-transform:\s*uppercase;/,
     );
-    expect(css).not.toMatch(/\.archive-date-list\s*\{/);
+    expect(css).not.toMatch(/\.archive-date-picker__control\s*\{/);
   });
 });
