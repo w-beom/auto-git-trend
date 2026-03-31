@@ -166,6 +166,30 @@ a {
   gap: 12px;
 }
 
+.archive-date-picker {
+  display: grid;
+  gap: 6px;
+}
+
+.archive-date-picker__label {
+  font-size: 0.72rem;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+}
+
+.archive-date-picker__control {
+  min-height: 44px;
+  padding: 10px 36px 10px 12px;
+  border: var(--border-md);
+  background: #ffffff;
+  box-shadow: var(--shadow-md);
+  font: inherit;
+  font-size: 0.98rem;
+  font-weight: 650;
+}
+
 .meta-chip {
   padding: 10px 14px;
   border: var(--border-md);
@@ -397,37 +421,6 @@ a {
   list-style: none;
   display: grid;
   gap: 20px;
-}
-
-.section-block--archive {
-  background:
-    linear-gradient(135deg, rgba(255, 255, 255, 0.88) 0 60%, rgba(17, 17, 17, 0.04) 60% 100%),
-    var(--paper);
-}
-
-.archive-date-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-  list-style: none;
-}
-
-.archive-date-list__link {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 48px;
-  padding: 10px 14px;
-  border: var(--border-md);
-  background: #ffffff;
-  box-shadow: var(--shadow-md);
-  font-size: 0.98rem;
-  font-weight: 650;
-}
-
-.archive-date-list__link:hover,
-.archive-date-list__link:focus-visible {
-  transform: translate(-2px, -2px);
 }
 
 .repo-card {
