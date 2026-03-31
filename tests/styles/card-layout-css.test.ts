@@ -79,4 +79,21 @@ describe("card layout css", () => {
       /@media\s*\(min-width:\s*1280px\)\s*\{[\s\S]*?\.section-block--top-three\s*\{[^}]*height:\s*var\(--top-three-section-height,\s*auto\);[^}]*overflow:\s*hidden;[^}]*transition:\s*height/,
     );
   });
+
+  it("styles repository cards for top-right detail toggles", () => {
+    const css = readGlobalsCss();
+
+    expect(css).toMatch(
+      /\.repo-card__masthead\s*\{[^}]*justify-content:\s*space-between;[^}]*align-items:\s*flex-start;/,
+    );
+    expect(css).toMatch(
+      /\.repo-card__masthead-main\s*\{[^}]*display:\s*flex;[^}]*flex-wrap:\s*wrap;/,
+    );
+    expect(css).toMatch(
+      /\.repo-card__toggle\s*\{[^}]*display:\s*inline-flex;[^}]*min-width:\s*44px;[^}]*border:\s*var\(--border-md\);/,
+    );
+    expect(css).toMatch(
+      /\.repo-card__toggle--expanded\s*\{[^}]*background:\s*var\(--orange\);/,
+    );
+  });
 });
