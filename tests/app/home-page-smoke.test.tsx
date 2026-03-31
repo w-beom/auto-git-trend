@@ -1,19 +1,22 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
-const { getLatestSnapshotPageData } = vi.hoisted(() => ({
+const { getLatestSnapshotPageData, getSnapshotArchiveDates } = vi.hoisted(() => ({
   getLatestSnapshotPageData: vi.fn(),
+  getSnapshotArchiveDates: vi.fn(),
 }));
 
 import HomePage from "@/app/page";
 
 vi.mock("@/lib/snapshots/queries", () => ({
   getLatestSnapshotPageData,
+  getSnapshotArchiveDates,
 }));
 
 describe("HomePage smoke test", () => {
   it("renders only the homepage safe empty state when no latest snapshot is available", async () => {
     getLatestSnapshotPageData.mockResolvedValue(null);
+    getSnapshotArchiveDates.mockResolvedValue(["2026-03-29"]);
 
     render(await HomePage());
 
@@ -34,5 +37,6 @@ describe("HomePage smoke test", () => {
         "The base app is ready for the daily GitHub Trending pipeline and future archive views.",
       ),
     ).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "아카이브" })).not.toBeInTheDocument();
   });
 });

@@ -1,11 +1,17 @@
-import { getLatestSnapshotPageData } from "@/lib/snapshots/queries";
+import {
+  getLatestSnapshotPageData,
+  getSnapshotArchiveDates,
+} from "@/lib/snapshots/queries";
 import { EmptyState } from "@/components/trending/empty-state";
 import { SiteShell } from "@/components/trending/site-shell";
 
 export const dynamic = "force-dynamic";
 
 export default async function HomePage() {
-  const snapshot = await getLatestSnapshotPageData();
+  const [snapshot, archiveDates] = await Promise.all([
+    getLatestSnapshotPageData(),
+    getSnapshotArchiveDates(),
+  ]);
 
   if (!snapshot) {
     return (
@@ -17,5 +23,5 @@ export default async function HomePage() {
     );
   }
 
-  return <SiteShell snapshot={snapshot} mode="latest" />;
+  return <SiteShell snapshot={snapshot} archiveDates={archiveDates} mode="latest" />;
 }
