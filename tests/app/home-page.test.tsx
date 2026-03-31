@@ -1,14 +1,16 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const { getLatestSnapshotPageData } = vi.hoisted(() => ({
+const { getLatestSnapshotPageData, getSnapshotArchiveDates } = vi.hoisted(() => ({
   getLatestSnapshotPageData: vi.fn(),
+  getSnapshotArchiveDates: vi.fn(),
 }));
 
 import HomePage from "@/app/page";
 
 vi.mock("@/lib/snapshots/queries", () => ({
   getLatestSnapshotPageData,
+  getSnapshotArchiveDates,
 }));
 
 function buildSnapshot() {
@@ -82,6 +84,7 @@ function buildSnapshot() {
 describe("HomePage", () => {
   beforeEach(() => {
     getLatestSnapshotPageData.mockReset();
+    getSnapshotArchiveDates.mockReset();
   });
 
   afterEach(() => {
@@ -90,6 +93,7 @@ describe("HomePage", () => {
 
   it("renders the latest snapshot summary data", async () => {
     getLatestSnapshotPageData.mockResolvedValue(buildSnapshot());
+    getSnapshotArchiveDates.mockResolvedValue([]);
 
     render(await HomePage());
 
@@ -147,6 +151,7 @@ describe("HomePage", () => {
       capturedAtIso: "2026-03-27T00:15:00.000Z",
       capturedAtLabel: "Captured Mar 27, 2026, 9:15 AM KST",
     });
+    getSnapshotArchiveDates.mockResolvedValue([]);
 
     render(await HomePage());
 
@@ -182,6 +187,7 @@ describe("HomePage", () => {
         },
       ],
     });
+    getSnapshotArchiveDates.mockResolvedValue([]);
 
     render(await HomePage());
 
@@ -209,6 +215,7 @@ describe("HomePage", () => {
 
   it("renders a safe empty state when no latest snapshot exists", async () => {
     getLatestSnapshotPageData.mockResolvedValue(null);
+    getSnapshotArchiveDates.mockResolvedValue(["2026-03-29"]);
 
     render(await HomePage());
 
@@ -228,5 +235,37 @@ describe("HomePage", () => {
         "The base app is ready for the daily GitHub Trending pipeline and future archive views.",
       ),
     ).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "아카이브" })).not.toBeInTheDocument();
+  });
+
+  it("renders archive navigation for every stored snapshot date", async () => {
+    getLatestSnapshotPageData.mockResolvedValue(buildSnapshot());
+    getSnapshotArchiveDates.mockResolvedValue([
+      "2026-03-29",
+      "2026-03-28",
+      "2026-03-27",
+    ]);
+
+    render(await HomePage());
+
+    const archiveSection = screen.getByRole("region", { name: "아카이브" });
+    const links = within(archiveSection).getAllByRole("link");
+
+    expect(getSnapshotArchiveDates).toHaveBeenCalled();
+    expect(links.map((link) => link.textContent)).toEqual([
+      "2026-03-29",
+      "2026-03-28",
+      "2026-03-27",
+    ]);
+    expect(links[1]).toHaveAttribute("href", "/archive/2026-03-28");
+  });
+
+  it("omits archive navigation when there are no archive dates to show", async () => {
+    getLatestSnapshotPageData.mockResolvedValue(buildSnapshot());
+    getSnapshotArchiveDates.mockResolvedValue([]);
+
+    render(await HomePage());
+
+    expect(screen.queryByRole("region", { name: "아카이브" })).not.toBeInTheDocument();
   });
 });
