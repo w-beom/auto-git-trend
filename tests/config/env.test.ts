@@ -9,7 +9,7 @@ describe("loadServerEnv", () => {
     GITHUB_TOKEN: "github-token",
     CRON_SECRET: "1234567890abcdef",
     OPENAI_API_KEY: "openai-key",
-  } as NodeJS.ProcessEnv;
+  } as unknown as NodeJS.ProcessEnv;
 
   it("throws when CRON_SECRET is shorter than 16 characters and identifies the key", () => {
     expect(() =>

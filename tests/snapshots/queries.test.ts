@@ -207,37 +207,54 @@ describe("snapshot queries", () => {
   });
 
   it("formats latest snapshot labels in KST using only Supabase env", async () => {
+    let callCount = 0;
+
     createClient.mockReturnValue(
       createSupabaseClientDouble(async ({ columns, filters, orderBy, limit }) => {
+        callCount += 1;
+
+        if (callCount === 1) {
+          expectSlimSnapshotColumns(columns);
+          expect(filters).toEqual([["status", "success"]]);
+          expect(orderBy).toEqual({
+            column: "snapshot_date",
+            ascending: false,
+          });
+          expect(limit).toBe(1);
+
+          return {
+            data: {
+              snapshot_date: "2026-03-29",
+              captured_at: "2026-03-29T00:15:00.000Z",
+              item_count: 1,
+              trending_snapshot_items: [
+                {
+                  rank: 1,
+                  repo_description_snapshot: "A fast launch platform.",
+                  summary_ko: "빠르게 배포할 수 있는 로켓 플랫폼입니다.",
+                  repository: {
+                    owner: "acme",
+                    name: "rocket",
+                    full_name: "acme/rocket",
+                    github_url: "https://github.com/acme/rocket",
+                    stars_total: 4200,
+                    forks_total: 210,
+                  },
+                },
+              ],
+            },
+            error: null,
+          };
+        }
+
         expectSlimSnapshotColumns(columns);
-        expect(filters).toEqual([["status", "success"]]);
-        expect(orderBy).toEqual({
-          column: "snapshot_date",
-          ascending: false,
-        });
-        expect(limit).toBe(1);
+        expect(filters).toEqual([
+          ["status", "success"],
+          ["snapshot_date", "2026-03-28"],
+        ]);
 
         return {
-          data: {
-            snapshot_date: "2026-03-29",
-            captured_at: "2026-03-29T00:15:00.000Z",
-            item_count: 1,
-            trending_snapshot_items: [
-              {
-                rank: 1,
-                repo_description_snapshot: "A fast launch platform.",
-                summary_ko: "빠르게 배포할 수 있는 로켓 플랫폼입니다.",
-                repository: {
-                  owner: "acme",
-                  name: "rocket",
-                  full_name: "acme/rocket",
-                  github_url: "https://github.com/acme/rocket",
-                  stars_total: 4200,
-                  forks_total: 210,
-                },
-              },
-            ],
-          },
+          data: null,
           error: null,
         };
       }),
@@ -245,7 +262,7 @@ describe("snapshot queries", () => {
     process.env = {
       SUPABASE_URL: "https://example.supabase.co",
       SUPABASE_SERVICE_ROLE_KEY: "service-role-key",
-    } as NodeJS.ProcessEnv;
+    } as unknown as NodeJS.ProcessEnv;
 
     const { getLatestSnapshotPageData } = await import("@/lib/snapshots/queries");
     const result = await getLatestSnapshotPageData();
@@ -260,6 +277,7 @@ describe("snapshot queries", () => {
         },
       },
     );
+    expect(callCount).toBe(2);
     expect(result).toMatchObject({
       snapshotDate: "2026-03-29",
       capturedAtLabel: "Captured Mar 29, 2026, 9:15 AM KST",
@@ -279,12 +297,177 @@ describe("snapshot queries", () => {
   it("throws clearly when Supabase env is genuinely misconfigured", async () => {
     process.env = {
       SUPABASE_SERVICE_ROLE_KEY: "service-role-key",
-    } as NodeJS.ProcessEnv;
+    } as unknown as NodeJS.ProcessEnv;
 
     const { getLatestSnapshotPageData } = await import("@/lib/snapshots/queries");
 
     await expect(getLatestSnapshotPageData()).rejects.toThrow(/SUPABASE_URL/);
     expect(createClient).not.toHaveBeenCalled();
+  });
+
+  it("marks repositories as new only when they are missing from the previous day snapshot", async () => {
+    let callCount = 0;
+
+    createClient.mockReturnValue(
+      createSupabaseClientDouble(async ({ columns, filters, orderBy, limit }) => {
+        callCount += 1;
+
+        if (callCount === 1) {
+          expectSlimSnapshotColumns(columns);
+          expect(filters).toEqual([["status", "success"]]);
+          expect(orderBy).toEqual({
+            column: "snapshot_date",
+            ascending: false,
+          });
+          expect(limit).toBe(1);
+
+          return {
+            data: {
+              snapshot_date: "2026-03-29",
+              captured_at: "2026-03-29T00:15:00.000Z",
+              item_count: 2,
+              trending_snapshot_items: [
+                {
+                  rank: 1,
+                  repo_description_snapshot: "A fast launch platform.",
+                  summary_ko: "빠르게 배포할 수 있는 로켓 플랫폼입니다.",
+                  repository: {
+                    owner: "acme",
+                    name: "rocket",
+                    full_name: "acme/rocket",
+                    github_url: "https://github.com/acme/rocket",
+                    stars_total: 4200,
+                    forks_total: 210,
+                  },
+                },
+                {
+                  rank: 2,
+                  repo_description_snapshot: "Orbit control center.",
+                  summary_ko: "관측 데이터 파이프라인을 정리해 주는 도구입니다.",
+                  repository: {
+                    owner: "beta",
+                    name: "orbit",
+                    full_name: "beta/orbit",
+                    github_url: "https://github.com/beta/orbit",
+                    stars_total: 3100,
+                    forks_total: 155,
+                  },
+                },
+              ],
+            },
+            error: null,
+          };
+        }
+
+        expectSlimSnapshotColumns(columns);
+        expect(filters).toEqual([
+          ["status", "success"],
+          ["snapshot_date", "2026-03-28"],
+        ]);
+
+        return {
+          data: {
+            snapshot_date: "2026-03-28",
+            captured_at: "2026-03-28T00:20:00.000Z",
+            item_count: 1,
+            trending_snapshot_items: [
+              {
+                rank: 1,
+                repo_description_snapshot: "Static deploy automation.",
+                summary_ko: "정적 사이트 배포 흐름을 단순화합니다.",
+                repository: {
+                  owner: "gamma",
+                  name: "comet",
+                  full_name: "gamma/comet",
+                  github_url: "https://github.com/gamma/comet",
+                  stars_total: 1800,
+                  forks_total: 44,
+                },
+              },
+            ],
+          },
+          error: null,
+        };
+      }),
+    );
+    process.env = {
+      SUPABASE_URL: "https://example.supabase.co",
+      SUPABASE_SERVICE_ROLE_KEY: "service-role-key",
+    } as unknown as NodeJS.ProcessEnv;
+
+    const { getLatestSnapshotPageData } = await import("@/lib/snapshots/queries");
+    const result = await getLatestSnapshotPageData();
+
+    expect(callCount).toBe(2);
+    expect(result?.items.map((item) => ({ fullName: item.fullName, isNew: item.isNew }))).toEqual([
+      { fullName: "acme/rocket", isNew: true },
+      { fullName: "beta/orbit", isNew: true },
+    ]);
+  });
+
+  it("does not mark repositories as new when the previous day snapshot is missing", async () => {
+    let callCount = 0;
+
+    createClient.mockReturnValue(
+      createSupabaseClientDouble(async ({ columns, filters, orderBy, limit }) => {
+        callCount += 1;
+
+        if (callCount === 1) {
+          expectSlimSnapshotColumns(columns);
+          expect(filters).toEqual([["status", "success"]]);
+          expect(orderBy).toEqual({
+            column: "snapshot_date",
+            ascending: false,
+          });
+          expect(limit).toBe(1);
+
+          return {
+            data: {
+              snapshot_date: "2026-03-29",
+              captured_at: "2026-03-29T00:15:00.000Z",
+              item_count: 1,
+              trending_snapshot_items: [
+                {
+                  rank: 1,
+                  repo_description_snapshot: "A fast launch platform.",
+                  summary_ko: "빠르게 배포할 수 있는 로켓 플랫폼입니다.",
+                  repository: {
+                    owner: "acme",
+                    name: "rocket",
+                    full_name: "acme/rocket",
+                    github_url: "https://github.com/acme/rocket",
+                    stars_total: 4200,
+                    forks_total: 210,
+                  },
+                },
+              ],
+            },
+            error: null,
+          };
+        }
+
+        expectSlimSnapshotColumns(columns);
+        expect(filters).toEqual([
+          ["status", "success"],
+          ["snapshot_date", "2026-03-28"],
+        ]);
+
+        return {
+          data: null,
+          error: null,
+        };
+      }),
+    );
+    process.env = {
+      SUPABASE_URL: "https://example.supabase.co",
+      SUPABASE_SERVICE_ROLE_KEY: "service-role-key",
+    } as unknown as NodeJS.ProcessEnv;
+
+    const { getLatestSnapshotPageData } = await import("@/lib/snapshots/queries");
+    const result = await getLatestSnapshotPageData();
+
+    expect(callCount).toBe(2);
+    expect(result?.items[0]?.isNew).toBe(false);
   });
 
   it("formats archive snapshot labels in KST", async () => {
@@ -324,7 +507,7 @@ describe("snapshot queries", () => {
     process.env = {
       SUPABASE_URL: "https://example.supabase.co",
       SUPABASE_SERVICE_ROLE_KEY: "service-role-key",
-    } as NodeJS.ProcessEnv;
+    } as unknown as NodeJS.ProcessEnv;
 
     const { getSnapshotPageDataByDate } = await import("@/lib/snapshots/queries");
     const result = await getSnapshotPageDataByDate("2026-03-28");
@@ -356,7 +539,7 @@ describe("snapshot queries", () => {
     process.env = {
       SUPABASE_URL: "https://example.supabase.co",
       SUPABASE_SERVICE_ROLE_KEY: "service-role-key",
-    } as NodeJS.ProcessEnv;
+    } as unknown as NodeJS.ProcessEnv;
 
     const { getSnapshotArchiveDates } = await import("@/lib/snapshots/queries");
 
@@ -368,7 +551,7 @@ describe("snapshot queries", () => {
   });
 
   it("returns an empty archive date list when Supabase env is absent", async () => {
-    process.env = {} as NodeJS.ProcessEnv;
+    process.env = {} as unknown as NodeJS.ProcessEnv;
 
     const { getSnapshotArchiveDates } = await import("@/lib/snapshots/queries");
 
@@ -398,7 +581,7 @@ describe("snapshot queries", () => {
     process.env = {
       SUPABASE_URL: "https://example.supabase.co",
       SUPABASE_SERVICE_ROLE_KEY: "service-role-key",
-    } as NodeJS.ProcessEnv;
+    } as unknown as NodeJS.ProcessEnv;
 
     const { getSnapshotArchiveDates } = await import("@/lib/snapshots/queries");
 
@@ -431,7 +614,7 @@ describe("snapshot queries", () => {
     process.env = {
       SUPABASE_URL: "https://example.supabase.co",
       SUPABASE_SERVICE_ROLE_KEY: "service-role-key",
-    } as NodeJS.ProcessEnv;
+    } as unknown as NodeJS.ProcessEnv;
 
     const { getSnapshotArchiveDates } = await import("@/lib/snapshots/queries");
 
@@ -475,7 +658,7 @@ describe("snapshot queries", () => {
       NODE_ENV: "development",
       SUPABASE_URL: "https://example.supabase.co",
       SUPABASE_SERVICE_ROLE_KEY: "service-role-key",
-    } as NodeJS.ProcessEnv;
+    } as unknown as NodeJS.ProcessEnv;
     const consoleInfo = vi.spyOn(console, "info").mockImplementation(() => {});
 
     const { getSnapshotPageDataByDate } = await import("@/lib/snapshots/queries");

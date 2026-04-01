@@ -644,9 +644,31 @@ a {
   color: var(--ink-muted);
 }
 
+.repo-card__title-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
 .repo-card__name {
   font-size: clamp(1.55rem, 2.5vw, 2.05rem);
   line-height: 0.98;
+}
+
+.repo-card__new-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: fit-content;
+  padding: 6px 10px;
+  border: var(--border-md);
+  border-radius: 999px;
+  background: var(--orange);
+  font-size: 0.76rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
 .repo-card__summary-block {

@@ -61,7 +61,10 @@ export function RepositoryCard({
 
         <div className="repo-card__body">
           <p className="repo-card__fullname">{item.fullName}</p>
-          <h3 className="repo-card__name">{item.name}</h3>
+          <div className="repo-card__title-row">
+            <h3 className="repo-card__name">{item.name}</h3>
+            {item.isNew ? <span className="repo-card__new-badge">NEW</span> : null}
+          </div>
           <div className="repo-card__summary-block" role="group" aria-label="프로젝트 요약">
             {visibleParagraphs.map((paragraph) => (
               <p key={paragraph} className="repo-card__summary-paragraph">

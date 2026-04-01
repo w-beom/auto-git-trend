@@ -34,7 +34,7 @@ describe("createOpenAISummaryClient", () => {
     const client = createOpenAISummaryClient({
       processEnv: {
         OPENAI_API_KEY: "test-openai-key",
-      } as NodeJS.ProcessEnv,
+      } as unknown as NodeJS.ProcessEnv,
     });
 
     await expect(client.summarize("prompt text")).resolves.toBe("한국어 응답");

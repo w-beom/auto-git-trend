@@ -124,6 +124,32 @@ describe("RepositoryCard", () => {
     expect(screen.queryByRole("button", { name: /상세/ })).not.toBeInTheDocument();
   });
 
+  it("renders a NEW badge next to the repository name when the item is new", () => {
+    render(
+      <RepositoryCard
+        item={{
+          rank: 4,
+          fullName: "acme/rocket",
+          owner: "acme",
+          name: "rocket",
+          githubUrl: "https://github.com/acme/rocket",
+          summaryKo: "첫 문단 요약입니다.",
+          description: null,
+          readmeExcerpt: null,
+          primaryLanguage: "TypeScript",
+          starsToday: 120,
+          starsTotal: 4200,
+          forksTotal: 210,
+          avatarUrl: "https://example.com/acme.png",
+          isNew: true,
+        }}
+      />,
+    );
+
+    expect(screen.getByRole("heading", { name: /rocket/i })).toBeInTheDocument();
+    expect(screen.getByText("NEW")).toBeInTheDocument();
+  });
+
   it("omits language and daily star growth in the detail card metadata", () => {
     render(
       <RepositoryCard

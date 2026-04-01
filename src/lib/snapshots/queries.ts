@@ -1,6 +1,8 @@
 import { createClient } from "@supabase/supabase-js";
 import { z } from "zod";
 
+import { formatDateUtc } from "@/lib/time";
+
 interface SnapshotItemQueryRow {
   rank: number;
   repo_description_snapshot: string | null;
@@ -42,6 +44,7 @@ export interface SnapshotPageItem {
   starsTotal: number | null;
   forksTotal: number | null;
   avatarUrl: string | null;
+  isNew?: boolean;
 }
 
 export interface SnapshotHighlight {
@@ -168,7 +171,30 @@ function formatCapturedAtLabel(capturedAtIso: string): string {
   return `Captured ${formatted} KST`;
 }
 
-function mapSnapshotRow(row: SnapshotQueryRow | null): SnapshotPageData | null {
+function getPreviousSnapshotDate(snapshotDate: string): string | null {
+  const date = new Date(`${snapshotDate}T00:00:00.000Z`);
+
+  if (Number.isNaN(date.getTime())) {
+    return null;
+  }
+
+  date.setUTCDate(date.getUTCDate() - 1);
+
+  return formatDateUtc(date);
+}
+
+function getRepositoryNames(row: SnapshotQueryRow | null): Set<string> {
+  return new Set(
+    (row?.trending_snapshot_items ?? [])
+      .map((item) => item.repository?.full_name)
+      .filter((fullName): fullName is string => Boolean(fullName)),
+  );
+}
+
+function mapSnapshotRow(
+  row: SnapshotQueryRow | null,
+  previousDayRepositoryNames: Set<string> | null = null,
+): SnapshotPageData | null {
   if (!row) {
     return null;
   }
@@ -192,6 +218,10 @@ function mapSnapshotRow(row: SnapshotQueryRow | null): SnapshotPageData | null {
       starsTotal: item.repository.stars_total,
       forksTotal: item.repository.forks_total,
       avatarUrl: null,
+      isNew:
+        previousDayRepositoryNames === null
+          ? false
+          : !previousDayRepositoryNames.has(item.repository.full_name),
     }));
 
   return {
@@ -208,18 +238,32 @@ function mapSnapshotRow(row: SnapshotQueryRow | null): SnapshotPageData | null {
   };
 }
 
-export async function getLatestSnapshotPageData(): Promise<SnapshotPageData | null> {
-  const startedAt = getDiagnosticNow();
-  const client = createSnapshotQueryClient();
-
+async function fetchSnapshotRow(
+  client: ReturnType<typeof createSnapshotQueryClient>,
+  snapshotDate?: string,
+): Promise<SnapshotQueryRow | null> {
   if (!client) {
     return null;
   }
 
-  const { data, error } = await client
+  const query = client
     .from("trending_snapshots")
     .select(SNAPSHOT_SELECT)
-    .eq("status", "success")
+    .eq("status", "success");
+
+  if (snapshotDate) {
+    const { data, error } = await query
+      .eq("snapshot_date", snapshotDate)
+      .maybeSingle<SnapshotQueryRow>();
+
+    if (error) {
+      throw new Error(`Failed to load snapshot ${snapshotDate}: ${error.message}`);
+    }
+
+    return data;
+  }
+
+  const { data, error } = await query
     .order("snapshot_date", { ascending: false })
     .limit(1)
     .maybeSingle<SnapshotQueryRow>();
@@ -228,7 +272,31 @@ export async function getLatestSnapshotPageData(): Promise<SnapshotPageData | nu
     throw new Error(`Failed to load latest snapshot page data: ${error.message}`);
   }
 
-  const result = mapSnapshotRow(data);
+  return data;
+}
+
+export async function getLatestSnapshotPageData(): Promise<SnapshotPageData | null> {
+  const startedAt = getDiagnosticNow();
+  const client = createSnapshotQueryClient();
+
+  if (!client) {
+    return null;
+  }
+
+  const latestSnapshot = await fetchSnapshotRow(client);
+
+  if (!latestSnapshot) {
+    return null;
+  }
+
+  const previousSnapshotDate = getPreviousSnapshotDate(latestSnapshot.snapshot_date);
+  const previousSnapshot = previousSnapshotDate
+    ? await fetchSnapshotRow(client, previousSnapshotDate)
+    : null;
+  const result = mapSnapshotRow(
+    latestSnapshot,
+    previousSnapshot ? getRepositoryNames(previousSnapshot) : null,
+  );
 
   logSnapshotDiagnostic("query", {
     name: "getLatestSnapshotPageData",
@@ -255,18 +323,8 @@ export async function getSnapshotPageDataByDate(
     return null;
   }
 
-  const { data, error } = await client
-    .from("trending_snapshots")
-    .select(SNAPSHOT_SELECT)
-    .eq("status", "success")
-    .eq("snapshot_date", snapshotDate)
-    .maybeSingle<SnapshotQueryRow>();
-
-  if (error) {
-    throw new Error(`Failed to load snapshot ${snapshotDate}: ${error.message}`);
-  }
-
-  const result = mapSnapshotRow(data);
+  const snapshot = await fetchSnapshotRow(client, snapshotDate);
+  const result = mapSnapshotRow(snapshot);
 
   logSnapshotDiagnostic("query", {
     name: "getSnapshotPageDataByDate",
